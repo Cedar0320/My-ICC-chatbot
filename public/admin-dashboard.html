@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理後台 - CommAI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            font-size: 24px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .admin-info {
+            font-size: 14px;
+        }
+
+        .logout-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 8px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .logout-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        .stat-card h3 {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .stat-card .subvalue {
+            font-size: 14px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        .panel h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .search-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .search-bar input {
+            flex: 1;
+            padding: 10px 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .search-bar button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        table td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-admin {
+            background: #ffeaa7;
+            color: #d63031;
+        }
+
+        .badge-user {
+            background: #dfe6e9;
+            color: #2d3436;
+        }
+
+        .btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.3s;
+        }
+
+        .btn-view {
+            background: #74b9ff;
+            color: white;
+        }
+
+        .btn-view:hover {
+            background: #0984e3;
+        }
+
+        .btn-delete {
+            background: #ff7675;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background: #d63031;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .pagination button {
+            padding: 8px 15px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+
+        .pagination button.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: white;
+        }
+
+        .badge-admin {
+            background: #e74c3c;
+        }
+
+        .badge-user {
+            background: #3498db;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            width: 90%;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-close {
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 CommAI 管理後台</h1>
+        <div class="header-actions">
+            <div class="admin-info">
+                <span id="adminUsername">管理員</span>
+            </div>
+            <button class="logout-btn" onclick="logout()">登出</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 統計資料 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>總使用者數</h3>
+                <div class="value" id="totalUsers">-</div>
+                <div class="subvalue">最近7天新增: <span id="newUsers">-</span></div>
+            </div>
+            <div class="stat-card">
+                <h3>總練習次數</h3>
+                <div class="value" id="totalPractices">-</div>
+                <div class="subvalue">已完成: <span id="completedPractices">-</span></div>
+            </div>
+            <div class="stat-card">
+                <h3>非語言數據練習</h3>
+                <div class="value" id="nonverbalPractices">-</div>
+                <div class="subvalue">總錄音數: <span id="totalRecordings">-</span></div>
+            </div>
+            <div class="stat-card">
+                <h3>管理員帳號</h3>
+                <div class="value" id="adminCount">-</div>
+                <div class="subvalue">一般使用者: <span id="regularUsers">-</span></div>
+            </div>
+        </div>
+
+        <!-- 非語言數據概覽 -->
+        <div class="panel" id="nonverbalOverviewPanel" style="display: none;">
+            <h2>📊 非語言溝通表現概覽</h2>
+            <p style="color: #666; margin-bottom: 15px;">查看所有使用者最近的非語言溝通表現數據</p>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <select id="techniqueFilter" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                    <option value="">所有技巧</option>
+                    <option value="我訊息">我訊息</option>
+                    <option value="三明治溝通法">三明治溝通法</option>
+                    <option value="綜合溝通技巧">綜合溝通技巧</option>
+                </select>
+                <button onclick="loadNonverbalOverview()" style="padding: 8px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                    刷新數據
+                </button>
+            </div>
+
+            <div id="nonverbalOverviewContainer">
+                <div class="loading">載入中...</div>
+            </div>
+        </div>
+
+        <!-- 使用者列表 -->
+        <div class="panel">
+            <h2>使用者列表</h2>
+
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="搜尋使用者名稱或電子郵件...">
+                <button onclick="searchUsers()">搜尋</button>
+            </div>
+
+            <div id="usersTableContainer">
+                <div class="loading">載入中...</div>
+            </div>
+
+            <div class="pagination" id="pagination"></div>
+        </div>
+    </div>
+
+    <!-- 使用者詳情 Modal -->
+    <div id="userModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>使用者詳情</h2>
+                <span class="modal-close" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="userDetails"></div>
+        </div>
+    </div>
+
+    <!-- 練習詳情 Modal -->
+    <div id="practicesModal" class="modal">
+        <div class="modal-content" style="max-width: 1200px; width: 95%;">
+            <div class="modal-header">
+                <h2 id="practicesModalTitle">練習紀錄</h2>
+                <span class="modal-close" onclick="closePracticesModal()">&times;</span>
+            </div>
+            <div id="practicesDetails"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        let currentSearch = '';
+        const limit = 20;
+
+        // 檢查登入狀態
+        function checkAuth() {
+            // 優先檢查一般 token（從 index.html 登入的）
+            let token = localStorage.getItem('token');
+            let userRole = localStorage.getItem('userRole');
+            let username = localStorage.getItem('username');
+
+            // 如果沒有一般 token，檢查 admin token
+            if (!token) {
+                token = localStorage.getItem('adminToken');
+                const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
+                userRole = adminUser.role;
+                username = adminUser.username;
+            }
+
+            // 如果沒有任何 token，跳轉到登入頁
+            if (!token) {
+                window.location.href = '/';
+                return false;
+            }
+
+            // 檢查是否為 admin
+            if (userRole !== 'admin') {
+                alert('您沒有管理員權限');
+                window.location.href = '/';
+                return false;
+            }
+
+            // 顯示管理員資訊
+            document.getElementById('adminUsername').textContent = username || '管理員';
+            return token;
+        }
+
+        // 登出
+        function logout() {
+            // 清除所有相關的 token 和使用者資料
+            localStorage.removeItem('token');
+            localStorage.removeItem('adminToken');
+            localStorage.removeItem('adminUser');
+            localStorage.removeItem('username');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('userRole');
+            window.location.href = '/';
+        }
+
+        // 檢查非語言數據是否有效（有實際測量值，不全為0或undefined）
+        function hasValidNonverbalData(nonverbalData) {
+            if (!nonverbalData) return false;
+            
+            // 檢查是否有任何一個關鍵指標有有效的非零值
+            const hasEyeContact = nonverbalData.eyeContactRate !== undefined && nonverbalData.eyeContactRate > 0;
+            const hasSmile = nonverbalData.smileRate !== undefined && nonverbalData.smileRate > 0;
+            const hasPosture = nonverbalData.openPostureRate !== undefined && nonverbalData.openPostureRate > 0;
+            const hasGestures = nonverbalData.gesturesUsed !== undefined && nonverbalData.gesturesUsed > 0;
+            
+            return hasEyeContact || hasSmile || hasPosture || hasGestures;
+        }
+
+        // 檢查練習是否包含有效的非語言數據
+        function practiceHasValidNonverbalData(practice) {
+            if (!practice || !practice.history) return false;
+            
+            return practice.history.some(entry => 
+                entry.role === '導師' && 
+                entry.nonverbalData && 
+                hasValidNonverbalData(entry.nonverbalData)
+            );
+        }
+
+        // 獲取統計資料
+        async function loadStats() {
+            try {
+                const token = checkAuth();
+                const response = await fetch('/api/admin/stats', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const stats = data.stats;
+                    document.getElementById('totalUsers').textContent = stats.users.total;
+                    document.getElementById('newUsers').textContent = stats.users.newLast7Days;
+                    document.getElementById('totalPractices').textContent = stats.practices.total;
+                    document.getElementById('completedPractices').textContent = stats.practices.completed;
+                    document.getElementById('nonverbalPractices').textContent = stats.practices.withNonverbal;
+                    document.getElementById('totalRecordings').textContent = stats.recordings.total;
+                    document.getElementById('adminCount').textContent = stats.users.admins;
+                    document.getElementById('regularUsers').textContent = stats.users.regular;
+                }
+            } catch (error) {
+                console.error('獲取統計資料失敗:', error);
+            }
+        }
+
+        // 載入非語言數據概覽
+        async function loadNonverbalOverview() {
+            try {
+                const token = checkAuth();
+                const technique = document.getElementById('techniqueFilter').value;
+                const response = await fetch(`/api/admin/nonverbal/overview?technique=${encodeURIComponent(technique)}&limit=30`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayNonverbalOverview(data.data, data.total);
+                } else {
+                    document.getElementById('nonverbalOverviewContainer').innerHTML = `<p class="loading">載入失敗: ${data.message}</p>`;
+                }
+            } catch (error) {
+                console.error('載入非語言數據概覽失敗:', error);
+                document.getElementById('nonverbalOverviewContainer').innerHTML = '<p class="loading">載入失敗</p>';
+            }
+        }
+
+        // 顯示非語言數據概覽
+        function displayNonverbalOverview(data, total) {
+            const container = document.getElementById('nonverbalOverviewContainer');
+            const panel = document.getElementById('nonverbalOverviewPanel');
+
+            // 有数据或无数据时都显示面板
+            panel.style.display = 'block';
+
+            if (data.length === 0) {
+                // 如果没有数据，显示提示信息
+                container.innerHTML = `
+                    <div style="padding: 40px; text-align: center; color: #999;">
+                        <div style="font-size: 48px; margin-bottom: 10px;">📊</div>
+                        <div style="font-size: 16px; margin-bottom: 5px;">共 0 筆數據</div>
+                        <div style="font-size: 14px;">目前沒有符合條件的非語言溝通數據</div>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div style="margin-bottom: 15px; color: #666; font-size: 14px;">
+                    共 ${total} 筆數據，顯示最近 ${data.length} 筆
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>使用者</th>
+                            <th>技巧</th>
+                            <th>👁️ 眼神接觸</th>
+                            <th>😊 微笑率</th>
+                            <th>🤝 開放姿態</th>
+                            <th>日期</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            data.forEach(item => {
+                const date = new Date(item.createdAt).toLocaleDateString('zh-TW');
+                const eyeColor = item.averageEyeContactRate >= 60 ? '#27ae60' : item.averageEyeContactRate >= 30 ? '#f39c12' : '#e74c3c';
+                const smileColor = item.averageSmileRate >= 50 ? '#27ae60' : item.averageSmileRate >= 25 ? '#f39c12' : '#e74c3c';
+                const postureColor = item.averageOpenPostureRate >= 60 ? '#27ae60' : item.averageOpenPostureRate >= 30 ? '#f39c12' : '#e74c3c';
+
+                html += `
+                    <tr>
+                        <td>
+                            <div style="font-weight: 500;">${item.username}</div>
+                            <div style="font-size: 12px; color: #999;">${item.email}</div>
+                        </td>
+                        <td><span class="badge" style="background: #3498db;">${item.technique || 'N/A'}</span></td>
+                        <td style="color: ${eyeColor}; font-weight: bold;">${item.averageEyeContactRate.toFixed(1)}%</td>
+                        <td style="color: ${smileColor}; font-weight: bold;">${item.averageSmileRate.toFixed(1)}%</td>
+                        <td style="color: ${postureColor}; font-weight: bold;">${item.averageOpenPostureRate.toFixed(1)}%</td>
+                        <td>${date}</td>
+                        <td>
+                            <button class="btn btn-view" onclick="viewNonverbalDetail('${item.userId}', '${item.practiceId}')">詳情</button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        // 查看非語言數據詳情
+        async function viewNonverbalDetail(userId, practiceId) {
+            try {
+                const token = checkAuth();
+                const response = await fetch(`/api/admin/users/${userId}/practices/${practiceId}/nonverbal`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayNonverbalDetailModal(data);
+                } else {
+                    alert('獲取詳情失敗: ' + data.message);
+                }
+            } catch (error) {
+                console.error('獲取非語言詳情失敗:', error);
+                alert('獲取詳情失敗');
+            }
+        }
+
+        // 顯示非語言數據詳情 Modal
+        function displayNonverbalDetailModal(data) {
+            const modal = document.getElementById('practicesModal');
+            const title = document.getElementById('practicesModalTitle');
+            const container = document.getElementById('practicesDetails');
+
+            title.textContent = `非語言數據詳情 - ${data.technique}`;
+
+            let html = `
+                <div style="margin-bottom: 20px;">
+                    <h3>練習資訊</h3>
+                    <p><strong>技巧:</strong> ${data.technique}</p>
+                    <p><strong>日期:</strong> ${new Date(data.createdAt).toLocaleString('zh-TW')}</p>
+                    ${data.scenario ? `<p><strong>情境:</strong> ${data.scenario.substring(0, 150)}...</p>` : ''}
+                </div>
+
+                <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3 style="margin-top: 0;">📊 整體平均表現</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div style="background: white; padding: 15px; border-radius: 5px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">👁️ 平均眼神接觸率</div>
+                            <div style="font-size: 28px; font-weight: bold; color: ${data.summary.averageEyeContactRate >= 60 ? '#27ae60' : data.summary.averageEyeContactRate >= 30 ? '#f39c12' : '#e74c3c'};">
+                                ${data.summary.averageEyeContactRate.toFixed(1)}%
+                            </div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">😊 平均微笑率</div>
+                            <div style="font-size: 28px; font-weight: bold; color: ${data.summary.averageSmileRate >= 50 ? '#27ae60' : data.summary.averageSmileRate >= 25 ? '#f39c12' : '#e74c3c'};">
+                                ${data.summary.averageSmileRate.toFixed(1)}%
+                            </div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">🤝 平均開放姿態率</div>
+                            <div style="font-size: 28px; font-weight: bold; color: ${data.summary.averageOpenPostureRate >= 60 ? '#27ae60' : data.summary.averageOpenPostureRate >= 30 ? '#f39c12' : '#e74c3c'};">
+                                ${data.summary.averageOpenPostureRate.toFixed(1)}%
+                            </div>
+                        </div>
+                        <div style="background: white; padding: 15px; border-radius: 5px;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">✋ 總手勢次數</div>
+                            <div style="font-size: 28px; font-weight: bold; color: #3498db;">
+                                ${data.summary.totalGestures}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <h3>📈 各輪次詳細數據 (共 ${data.details.length} 輪)</h3>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+            `;
+
+            data.details.forEach((detail, index) => {
+                html += `
+                    <div style="border: 1px solid #ddd; border-radius: 8px; padding: 15px; background: white;">
+                        <div style="font-weight: bold; color: #2c3e50; margin-bottom: 10px;">
+                            第 ${detail.turnNumber} 輪 - ${new Date(detail.timestamp).toLocaleTimeString('zh-TW')}
+                        </div>
+                        <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 14px; color: #555;">
+                            ${detail.content.substring(0, 100)}${detail.content.length > 100 ? '...' : ''}
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px;">
+                            ${detail.nonverbalData.eyeContactRate !== undefined ? `
+                                <div style="background: #e3f2fd; padding: 8px; border-radius: 4px; text-align: center;">
+                                    <div style="font-size: 11px; color: #666;">👁️ 眼神接觸</div>
+                                    <div style="font-size: 18px; font-weight: bold; color: ${detail.nonverbalData.eyeContactRate >= 60 ? '#27ae60' : detail.nonverbalData.eyeContactRate >= 30 ? '#f39c12' : '#e74c3c'};">
+                                        ${detail.nonverbalData.eyeContactRate.toFixed(1)}%
+                                    </div>
+                                </div>
+                            ` : ''}
+                            ${detail.nonverbalData.smileRate !== undefined ? `
+                                <div style="background: #fff9c4; padding: 8px; border-radius: 4px; text-align: center;">
+                                    <div style="font-size: 11px; color: #666;">😊 微笑</div>
+                                    <div style="font-size: 18px; font-weight: bold; color: ${detail.nonverbalData.smileRate >= 50 ? '#27ae60' : detail.nonverbalData.smileRate >= 25 ? '#f39c12' : '#e74c3c'};">
+                                        ${detail.nonverbalData.smileRate.toFixed(1)}%
+                                    </div>
+                                </div>
+                            ` : ''}
+                            ${detail.nonverbalData.openPostureRate !== undefined ? `
+                                <div style="background: #c8e6c9; padding: 8px; border-radius: 4px; text-align: center;">
+                                    <div style="font-size: 11px; color: #666;">🤝 開放姿態</div>
+                                    <div style="font-size: 18px; font-weight: bold; color: ${detail.nonverbalData.openPostureRate >= 60 ? '#27ae60' : detail.nonverbalData.openPostureRate >= 30 ? '#f39c12' : '#e74c3c'};">
+                                        ${detail.nonverbalData.openPostureRate.toFixed(1)}%
+                                    </div>
+                                </div>
+                            ` : ''}
+                            ${detail.nonverbalData.gesturesUsed !== undefined ? `
+                                <div style="background: #f3e5f5; padding: 8px; border-radius: 4px; text-align: center;">
+                                    <div style="font-size: 11px; color: #666;">✋ 手勢</div>
+                                    <div style="font-size: 18px; font-weight: bold; color: #9c27b0;">
+                                        ${detail.nonverbalData.gesturesUsed}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                        ${detail.nonverbalData.gesturesList && detail.nonverbalData.gesturesList.length > 0 ? `
+                            <div style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px;">
+                                <div style="font-size: 11px; color: #666; margin-bottom: 4px;">使用的手勢:</div>
+                                <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                                    ${detail.nonverbalData.gesturesList.map(g => `
+                                        <span style="background: #e3f2fd; padding: 3px 8px; border-radius: 10px; font-size: 11px; color: #1976d2;">
+                                            ${g.name || g}
+                                        </span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        // 載入使用者列表
+        async function loadUsers(page = 1, search = '') {
+            try {
+                const token = checkAuth();
+                const response = await fetch(`/api/admin/users?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayUsers(data.users);
+                    displayPagination(data.pagination);
+                } else {
+                    document.getElementById('usersTableContainer').innerHTML = `<p class="loading">載入失敗: ${data.message}</p>`;
+                }
+            } catch (error) {
+                console.error('載入使用者列表失敗:', error);
+                document.getElementById('usersTableContainer').innerHTML = '<p class="loading">載入失敗</p>';
+            }
+        }
+
+        // 顯示使用者列表
+        function displayUsers(users) {
+            const container = document.getElementById('usersTableContainer');
+
+            if (users.length === 0) {
+                container.innerHTML = '<p class="loading">沒有找到使用者</p>';
+                return;
+            }
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>使用者名稱</th>
+                            <th>電子郵件</th>
+                            <th>角色</th>
+                            <th>練習次數</th>
+                            <th>錄音數</th>
+                            <th>註冊時間</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            users.forEach(user => {
+                const createdDate = new Date(user.createdAt).toLocaleDateString('zh-TW');
+                html += `
+                    <tr>
+                        <td>${user.username}</td>
+                        <td>${user.email}</td>
+                        <td><span class="badge ${user.role === 'admin' ? 'badge-admin' : 'badge-user'}">${user.role === 'admin' ? '管理員' : '使用者'}</span></td>
+                        <td>${user.stats.totalPractices}</td>
+                        <td>${user.stats.totalRecordings}</td>
+                        <td>${createdDate}</td>
+                        <td>
+                            <button class="btn btn-view" onclick="viewUser('${user._id}')">查看</button>
+                            ${user.role !== 'admin' ? `<button class="btn btn-delete" onclick="deleteUser('${user._id}', '${user.username}')">刪除</button>` : ''}
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        // 顯示分頁
+        function displayPagination(pagination) {
+            const container = document.getElementById('pagination');
+            let html = '';
+
+            // 上一頁按鈕
+            html += `<button ${pagination.page === 1 ? 'disabled' : ''} onclick="changePage(${pagination.page - 1})">上一頁</button>`;
+
+            // 頁碼按鈕
+            for (let i = 1; i <= pagination.pages; i++) {
+                if (i === 1 || i === pagination.pages || (i >= pagination.page - 2 && i <= pagination.page + 2)) {
+                    html += `<button class="${i === pagination.page ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
+                } else if (i === pagination.page - 3 || i === pagination.page + 3) {
+                    html += '<span>...</span>';
+                }
+            }
+
+            // 下一頁按鈕
+            html += `<button ${pagination.page === pagination.pages ? 'disabled' : ''} onclick="changePage(${pagination.page + 1})">下一頁</button>`;
+
+            container.innerHTML = html;
+        }
+
+        // 改變頁碼
+        function changePage(page) {
+            currentPage = page;
+            loadUsers(currentPage, currentSearch);
+        }
+
+        // 搜尋使用者
+        function searchUsers() {
+            currentSearch = document.getElementById('searchInput').value.trim();
+            currentPage = 1;
+            loadUsers(currentPage, currentSearch);
+        }
+
+        // 查看使用者詳情
+        async function viewUser(userId) {
+            try {
+                const token = checkAuth();
+                const response = await fetch(`/api/admin/users/${userId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayUserDetails(data.user, data.stats);
+                }
+            } catch (error) {
+                console.error('獲取使用者詳情失敗:', error);
+            }
+        }
+
+        // 顯示使用者詳情
+        function displayUserDetails(user, stats) {
+            const modal = document.getElementById('userModal');
+            const container = document.getElementById('userDetails');
+
+            let html = `
+                <div style="margin-bottom: 20px;">
+                    <h3>${user.username}</h3>
+                    <p>電子郵件: ${user.email}</p>
+                    <p>角色: <span class="badge ${user.role === 'admin' ? 'badge-admin' : 'badge-user'}">${user.role === 'admin' ? '管理員' : '使用者'}</span></p>
+                    <p>註冊時間: ${new Date(user.createdAt).toLocaleString('zh-TW')}</p>
+                </div>
+
+                <h3>練習統計</h3>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                        <div style="font-size: 12px; color: #666;">總練習次數</div>
+                        <div style="font-size: 24px; font-weight: bold;">${stats.totalPractices}</div>
+                    </div>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                        <div style="font-size: 12px; color: #666;">已完成</div>
+                        <div style="font-size: 24px; font-weight: bold;">${stats.completedPractices}</div>
+                    </div>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                        <div style="font-size: 12px; color: #666;">總錄音數</div>
+                        <div style="font-size: 24px; font-weight: bold;">${stats.totalRecordings}</div>
+                    </div>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                        <div style="font-size: 12px; color: #666;">非語言數據練習</div>
+                        <div style="font-size: 24px; font-weight: bold;">${stats.practicesWithNonverbal}</div>
+                    </div>
+                </div>
+            `;
+
+            if (stats.techniqueBreakdown && Object.keys(stats.techniqueBreakdown).length > 0) {
+                html += '<h3>技巧分布</h3><ul>';
+                for (const [technique, count] of Object.entries(stats.techniqueBreakdown)) {
+                    html += `<li>${technique}: ${count} 次</li>`;
+                }
+                html += '</ul>';
+            }
+
+            // 添加查看練習紀錄按鈕
+            html += `
+                <div style="margin-top: 30px; text-align: center;">
+                    <button onclick="viewUserPractices('${user._id}', '${user.username}')" style="padding: 12px 24px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">
+                        📝 查看所有練習紀錄 (${stats.totalPractices})
+                    </button>
+                </div>
+            `;
+
+            container.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        // 關閉 Modal
+        function closeModal() {
+            document.getElementById('userModal').style.display = 'none';
+        }
+
+        // 刪除使用者
+        async function deleteUser(userId, username) {
+            if (!confirm(`確定要刪除使用者 "${username}" 嗎？此操作無法復原！`)) {
+                return;
+            }
+
+            try {
+                const token = checkAuth();
+                const response = await fetch(`/api/admin/users/${userId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('使用者已刪除');
+                    loadUsers(currentPage, currentSearch);
+                    loadStats();
+                } else {
+                    alert('刪除失敗: ' + data.message);
+                }
+            } catch (error) {
+                console.error('刪除使用者失敗:', error);
+                alert('刪除失敗');
+            }
+        }
+
+        // 查看使用者的所有練習紀錄
+        let currentPracticesPage = 1;
+        let currentPracticesUserId = null;
+        let currentPracticesUsername = null;
+        const practicesPerPage = 10;
+
+        async function viewUserPractices(userId, username, page = 1) {
+            try {
+                currentPracticesUserId = userId;
+                currentPracticesUsername = username;
+                currentPracticesPage = page;
+
+                const token = checkAuth();
+                const response = await fetch(`/api/admin/users/${userId}/practices?page=${page}&limit=${practicesPerPage}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayPractices(data.practices, username, data.pagination);
+                    // 關閉使用者詳情modal,開啟練習modal
+                    closeModal();
+                } else {
+                    alert('獲取練習紀錄失敗: ' + data.message);
+                }
+            } catch (error) {
+                console.error('獲取練習紀錄失敗:', error);
+                alert('獲取練習紀錄失敗');
+            }
+        }
+
+        // 練習分頁控制
+        function changePracticesPage(direction) {
+            const newPage = currentPracticesPage + direction;
+            if (newPage >= 1) {
+                viewUserPractices(currentPracticesUserId, currentPracticesUsername, newPage);
+            }
+        }
+
+        // 顯示練習詳情
+        function displayPractices(practices, username, pagination) {
+            const modal = document.getElementById('practicesModal');
+            const title = document.getElementById('practicesModalTitle');
+            const container = document.getElementById('practicesDetails');
+
+            // 只顯示有 AI 回饋分析的練習（資料模型中無 `completed` 欄位）
+            const filteredPractices = practices.filter(p => p && p.analysis && p.analysis.toString().trim().length > 0);
+
+            // 使用分頁資訊中的總數
+            const totalCount = pagination ? pagination.total : filteredPractices.length;
+            title.textContent = `${username} 的練習紀錄 (共 ${totalCount} 筆)`;
+
+            if (filteredPractices.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #999; padding: 40px;">該使用者尚無已完成且含 AI 回饋的練習紀錄</p>';
+                modal.style.display = 'flex';
+                return;
+            }
+
+            let html = '';
+            filteredPractices.forEach((practice, index) => {
+                const createdDate = new Date(practice.createdAt).toLocaleString('zh-TW');
+                const scenarioPreview = practice.scenario?.substring(0, 100) + (practice.scenario?.length > 100 ? '...' : '');
+                const hasValidNonverbal = practiceHasValidNonverbalData(practice);
+                
+                // 檢查對話中是否有有效的非語言數據
+                const hasNonverbalInHistory = practice.history?.some(h => 
+                    h.role === '導師' && h.nonverbalData && hasValidNonverbalData(h.nonverbalData)
+                );
+
+                html += `
+                    <div style="border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px; background: white;">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px;">
+                            <div>
+                                <h3 style="margin: 0 0 10px 0; color: #2c3e50;">練習 #${filteredPractices.length - index}</h3>
+                                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                                    <span class="badge" style="background: #3498db;">${practice.technique || '未指定技巧'}</span>
+                                    <span class="badge" style="background: ${practice.difficulty === '簡單' ? '#27ae60' : practice.difficulty === '中等' ? '#f39c12' : '#e74c3c'};">${practice.difficulty || '未指定難度'}</span>
+                                    ${practice.analysis && practice.analysis.trim() !== '' ? '<span class="badge" style="background: #27ae60;">已完成</span>' : '<span class="badge" style="background: #95a5a6;">進行中</span>'}
+                                    ${practice.isRetry ? '<span class="badge" style="background: #9b59b6;">重做</span>' : ''}
+                                    ${hasValidNonverbal ? '<span class="badge" style="background: #e67e22;">含非語言數據</span>' : ''}
+                                </div>
+                                <p style="color: #7f8c8d; font-size: 14px; margin: 0;">⏰ ${createdDate}</p>
+                            </div>
+                            <button onclick="togglePracticeDetails('practice-${practice._id}')" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                                展開詳情 ▼
+                            </button>
+                        </div>
+
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                            <strong>情境:</strong>
+                            <p style="margin: 5px 0 0 0; color: #555;">${scenarioPreview}</p>
+                        </div>
+
+                        <div id="practice-${practice._id}" style="display: none;">
+                            <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+
+                            ${practice.scenario ? `
+                            <div style="margin-bottom: 20px;">
+                                <h4 style="color: #2c3e50; margin-bottom: 10px;">📝 完整情境描述</h4>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; line-height: 1.6;">
+                                    ${practice.scenario}
+                                </div>
+                            </div>
+                            ` : ''}
+
+                            ${practice.history && practice.history.length > 0 ? `
+                            <div style="margin-bottom: 20px;">
+                                <h4 style="color: #2c3e50; margin-bottom: 10px;">💬 對話紀錄 (${practice.history.length} 輪)${hasNonverbalInHistory ? ' <span style="color: #e67e22; font-size: 14px;">(含非語言數據)</span>' : ''}</h4>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                                    ${practice.history.map((msg, i) => {
+                                        const hasValidData = msg.role === '導師' && msg.nonverbalData && hasValidNonverbalData(msg.nonverbalData);
+                                        return `
+                                        <div style="margin-bottom: 15px; padding: 12px; background: white; border-left: 4px solid ${msg.role === '導師' ? '#3498db' : '#27ae60'}; border-radius: 4px;">
+                                            <div style="font-weight: bold; color: ${msg.role === '導師' ? '#3498db' : '#27ae60'}; margin-bottom: 5px;">
+                                                ${msg.role === '導師' ? '🎓' : '👤'} ${msg.role}
+                                            </div>
+                                            <div style="color: #555; line-height: 1.6;">${msg.content}</div>
+                                            ${hasValidData ? `
+                                                <div style="margin-top: 12px; padding: 12px; background: #e8f5e9; border-radius: 5px; border: 1px solid #81c784;">
+                                                    <div style="font-weight: bold; color: #2e7d32; margin-bottom: 8px; display: flex; align-items: center;">
+                                                        🎭 非語言溝通數據
+                                                    </div>
+                                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                                                        ${msg.nonverbalData.eyeContactRate !== undefined ? `
+                                                            <div style="background: white; padding: 8px; border-radius: 4px;">
+                                                                <div style="font-size: 11px; color: #666; margin-bottom: 3px;">👁️ 眼神接觸率</div>
+                                                                <div style="font-weight: bold; color: ${msg.nonverbalData.eyeContactRate >= 60 ? '#27ae60' : msg.nonverbalData.eyeContactRate >= 30 ? '#f39c12' : '#e74c3c'};">
+                                                                    ${msg.nonverbalData.eyeContactRate.toFixed(1)}%
+                                                                </div>
+                                                            </div>
+                                                        ` : ''}
+                                                        ${msg.nonverbalData.smileRate !== undefined ? `
+                                                            <div style="background: white; padding: 8px; border-radius: 4px;">
+                                                                <div style="font-size: 11px; color: #666; margin-bottom: 3px;">😊 微笑率</div>
+                                                                <div style="font-weight: bold; color: ${msg.nonverbalData.smileRate >= 50 ? '#27ae60' : msg.nonverbalData.smileRate >= 25 ? '#f39c12' : '#e74c3c'};">
+                                                                    ${msg.nonverbalData.smileRate.toFixed(1)}%
+                                                                </div>
+                                                            </div>
+                                                        ` : ''}
+                                                        ${msg.nonverbalData.openPostureRate !== undefined ? `
+                                                            <div style="background: white; padding: 8px; border-radius: 4px;">
+                                                                <div style="font-size: 11px; color: #666; margin-bottom: 3px;">🤝 開放姿態率</div>
+                                                                <div style="font-weight: bold; color: ${msg.nonverbalData.openPostureRate >= 60 ? '#27ae60' : msg.nonverbalData.openPostureRate >= 30 ? '#f39c12' : '#e74c3c'};">
+                                                                    ${msg.nonverbalData.openPostureRate.toFixed(1)}%
+                                                                </div>
+                                                            </div>
+                                                        ` : ''}
+                                                    </div>
+                                                    ${msg.nonverbalData.gesturesList && msg.nonverbalData.gesturesList.length > 0 ? `
+                                                        <div style="margin-top: 8px; padding: 8px; background: white; border-radius: 4px;">
+                                                            <div style="font-size: 11px; color: #666; margin-bottom: 4px;">使用的手勢:</div>
+                                                            <div style="display: flex; flex-wrap: wrap; gap: 5px;">
+                                                                ${msg.nonverbalData.gesturesList.map(g => `
+                                                                    <span style="background: #e3f2fd; padding: 3px 8px; border-radius: 10px; font-size: 11px; color: #1976d2;">
+                                                                        ${g.name || g}
+                                                                    </span>
+                                                                `).join('')}
+                                                            </div>
+                                                        </div>
+                                                    ` : ''}
+                                                    ${msg.nonverbalData.dataQuality ? `
+                                                        <div style="margin-top: 8px; padding: 6px 8px; background: #fff3cd; border-radius: 4px; font-size: 11px; color: #856404;">
+                                                            ℹ️ 數據品質: ${msg.nonverbalData.dataQuality.sampleCount || 0} 幀, 
+                                                            時長 ${msg.nonverbalData.dataQuality.duration || 0}秒, 
+                                                            偵測率 ${msg.nonverbalData.dataQuality.faceDetectionRate ? (msg.nonverbalData.dataQuality.faceDetectionRate * 100).toFixed(0) + '%' : 'N/A'}
+                                                        </div>
+                                                    ` : ''}
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                            ` : ''}
+
+                            ${practice.recordings && practice.recordings.length > 0 ? `
+                            <div style="margin-bottom: 20px;">
+                                <h4 style="color: #2c3e50; margin-bottom: 10px;">🎤 錄音紀錄 (${practice.recordings.length} 筆)</h4>
+                                <div style="display: flex; flex-direction: column; gap: 12px;">
+                                    ${practice.recordings.map((rec, i) => `
+                                        <div style="padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
+                                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                                <div>
+                                                    <strong style="color: #2c3e50;">🎵 錄音 #${i + 1}</strong>
+                                                    <div style="color: #7f8c8d; font-size: 13px; margin-top: 4px;">
+                                                        ⏰ ${new Date(rec.timestamp).toLocaleString('zh-TW')}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            ${rec.path ? `
+                                                <audio controls style="width: 100%; margin-top: 8px; border-radius: 4px;">
+                                                    <source src="${rec.path}" type="audio/mpeg">
+                                                    <source src="${rec.path}" type="audio/wav">
+                                                    您的瀏覽器不支援音頻播放
+                                                </audio>
+                                            ` : '<div style="color: #999; font-size: 14px;">錄音檔案不可用</div>'}
+                                            ${rec.transcription || rec.transcript ? `
+                                                <div style="margin-top: 10px; padding: 10px; background: white; border-radius: 4px; border-left: 3px solid #3498db;">
+                                                    <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 4px;">📝 語音轉文字:</div>
+                                                    <div style="color: #555; line-height: 1.5;">${rec.transcription || rec.transcript}</div>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            ` : ''}
+
+                            ${practice.analysis ? `
+                            <div style="margin-bottom: 20px;">
+                                <h4 style="color: #2c3e50; margin-bottom: 10px;">📊 AI 分析結果</h4>
+                                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107; white-space: pre-wrap; line-height: 1.6;">
+                                    ${practice.analysis}
+                                </div>
+                            </div>
+                            ` : ''}
+
+                            ${practice.feedback && practice.feedback.length > 0 ? `
+                            <div style="margin-bottom: 20px;">
+                                <h4 style="color: #2c3e50; margin-bottom: 10px;">💭 回饋意見 (${practice.feedback.length} 筆)</h4>
+                                <ul style="list-style: none; padding: 0;">
+                                    ${practice.feedback.map(fb => `
+                                        <li style="padding: 10px; background: #f8f9fa; margin-bottom: 8px; border-radius: 5px;">
+                                            ${fb.comment || '無內容'}
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+
+            // 添加分頁控件
+            if (pagination && pagination.pages > 1) {
+                html += `
+                    <div style="display: flex; justify-content: center; align-items: center; gap: 10px; padding: 20px; border-top: 1px solid #ddd; margin-top: 20px;">
+                        <button 
+                            onclick="changePracticesPage(-1)" 
+                            ${pagination.page === 1 ? 'disabled' : ''}
+                            style="padding: 8px 16px; background: ${pagination.page === 1 ? '#ccc' : '#3498db'}; color: white; border: none; border-radius: 5px; cursor: ${pagination.page === 1 ? 'not-allowed' : 'pointer'};">
+                            上一頁
+                        </button>
+                        <span style="color: #666;">第 ${pagination.page} / ${pagination.pages} 頁</span>
+                        <button 
+                            onclick="changePracticesPage(1)" 
+                            ${pagination.page >= pagination.pages ? 'disabled' : ''}
+                            style="padding: 8px 16px; background: ${pagination.page >= pagination.pages ? '#ccc' : '#3498db'}; color: white; border: none; border-radius: 5px; cursor: ${pagination.page >= pagination.pages ? 'not-allowed' : 'pointer'};">
+                            下一頁
+                        </button>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        // 切換練習詳情展開/收起
+        function togglePracticeDetails(id) {
+            const element = document.getElementById(id);
+            const button = event.target;
+
+            if (element.style.display === 'none') {
+                element.style.display = 'block';
+                button.textContent = '收起詳情 ▲';
+            } else {
+                element.style.display = 'none';
+                button.textContent = '展開詳情 ▼';
+            }
+        }
+
+        // 關閉練習Modal
+        function closePracticesModal() {
+            document.getElementById('practicesModal').style.display = 'none';
+        }
+
+        // 搜尋框Enter鍵支援
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!checkAuth()) return;
+
+            document.getElementById('searchInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    searchUsers();
+                }
+            });
+
+            // 技巧篩選變更時自動刷新
+            document.getElementById('techniqueFilter').addEventListener('change', () => {
+                loadNonverbalOverview();
+            });
+
+            // 載入資料
+            loadStats();
+            loadNonverbalOverview();
+            loadUsers(currentPage, currentSearch);
+        });
+
+        // 點擊 Modal 外部關閉
+        window.onclick = function(event) {
+            const modal = document.getElementById('userModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+    </script>
+</body>
+</html>

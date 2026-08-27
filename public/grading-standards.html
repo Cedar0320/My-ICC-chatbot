@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 評分標準</title>
+    <script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/s05kb253j7";
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "s05kb253j7");
+    </script>
+    <style>
+        /* 基本樣式重置 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft JhengHei', sans-serif;
+            background-color: #fff5fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        /* 頂部導航欄 */
+        .site-banner {
+            background-color: #e93ae1;
+            color: white;
+            text-align: center;
+            padding: 15px 20px;
+            font-size: 32px;
+            font-weight: bold;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        
+        .site-banner .welcome {
+            font-size: 20px;
+            margin: 0;
+        }
+        
+        .site-banner .logout-btn {
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        
+        /* 主內容區域 */
+        .container {
+            max-width: 1200px;
+            margin: 80px auto 30px;
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+        
+        /* 標籤切換區域 */
+        .tab-container {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e93ae1;
+            justify-content: center;
+        }
+        
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #666;
+            transition: all 0.3s ease;
+            margin: 0 10px;
+            font-size: 16px;
+            border-radius: 5px 5px 0 0;
+        }
+        
+        .tab.active {
+            color: white;
+            background-color: #e93ae1;
+            border-bottom: 2px solid #e93ae1;
+            margin-bottom: -2px;
+        }
+        
+        .tab:hover:not(.active) {
+            background-color: #ffecf8;
+            color: #e93ae1;
+        }
+        
+        /* 內容區塊 */
+        .tab-content {
+            display: none;
+            margin-top: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
+        }
+        
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* 評分表格 */
+        .grading-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 0.95em;
+            min-width: 400px;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .grading-table thead tr {
+            background-color: #e93ae1;
+            color: #ffffff;
+            text-align: left;
+            font-weight: bold;
+        }
+        
+        .grading-table th,
+        .grading-table td {
+            padding: 15px 18px;
+        }
+        
+        .grading-table tbody tr {
+            border-bottom: 1px solid #dddddd;
+        }
+        
+        .grading-table tbody tr:nth-of-type(odd) {
+            background-color: #ffffff;
+        }
+        
+        .grading-table tbody tr:nth-of-type(even) {
+            background-color: #ffe6f7;
+        }
+        
+        .grading-table tbody tr:last-of-type {
+            border-bottom: 2px solid #e93ae1;
+        }
+        
+        .grading-table tbody tr:hover {
+            background-color: #ffcce9;
+            transition: background-color 0.3s ease;
+        }
+        
+        /* 主等級欄位樣式 */
+        .main-grade {
+            background-color: #e93ae1;
+            color: white;
+            font-weight: bold;
+            text-align: center;
+            font-size: 1.2em;
+            border-right: 2px solid #fff;
+            vertical-align: middle;
+            padding: 20px 10px;
+        }
+        
+        /* 分類部分 */
+        .criteria-section {
+            margin-bottom: 30px;
+            background: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.05);
+        }
+        
+        .criteria-section h3 {
+            color: #e93ae1;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ffcce9;
+            font-size: 1.3em;
+        }
+        
+        /* 頁面標題與返回按鈕容器 */
+        .header-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            position: relative;
+        }
+        
+        /* 返回按鈕 */
+        .back-button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #e93ae1;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+            text-align: center;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        
+        .back-button:hover {
+            background-color: #d32f8f;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* 排版優化 */
+        .tab-content p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+        
+        /* 響應式設計 */
+        @media (max-width: 768px) {
+            .tab {
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+            
+            .grading-table {
+                font-size: 0.85em;
+            }
+            
+            .grading-table th,
+            .grading-table td {
+                padding: 10px 12px;
+            }
+            
+            .container {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 頂部導航欄 -->
+    <div class="site-banner">
+        <span class="welcome" id="welcomeMessage">歡迎!</span>
+        CommAI系統
+        <button id="logoutButton" class="logout-btn">登出</button>
+    </div>
+
+    <div class="container">
+        <div class="header-container">
+            <h1>AI 評分標準</h1>
+            <a href="test.html" class="back-button">返回練習頁面</a>
+        </div>
+        
+        <div class="tab-container">
+            <div class="tab active" onclick="showTab('i-message')">我訊息</div>
+            <div class="tab" onclick="showTab('sandwich')">三明治溝通法</div>
+            <div class="tab" onclick="showTab('comprehensive')">綜合溝通技巧</div>
+        </div>
+
+        <!-- 我訊息標籤內容 -->
+        <div id="i-message" class="tab-content active">
+            <table class="grading-table">
+                <thead>
+                    <tr>
+                        <th>主等級</th>
+                        <th>細分等級</th>
+                        <th>描述</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td rowspan="3" class="main-grade">A<br>(優秀)</td>
+                        <td>A+</td>
+                        <td>精準且流暢地運用「我訊息」四要素，語氣自然、情緒真誠，改善建議具體可行，與家長建立高信任關係。</td>
+                    </tr>
+                    <tr>
+                        <td>A</td>
+                        <td>能完整呈現「我訊息」技巧，語句清楚具說服力，與家長互動正向且有信任。</td>
+                    </tr>
+                    <tr>
+                        <td>A-</td>
+                        <td>大致掌握「我訊息」的要素，表達自然，但個別句向略顯籠統或語氣可再修飾，整體仍屬優秀表現。</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3" class="main-grade">B<br>(良好)</td>
+                        <td>B+</td>
+                        <td>有意識使用「我訊息」，能清楚表達立場與感受，僅在細節（如描述具體行為或改善建議）略嫌不足。</td>
+                    </tr>
+                    <tr>
+                        <td>B</td>
+                        <td>展現「我訊息」主要結構，語句基本清楚，部分表達略顯含糊，互動品質良好。</td>
+                    </tr>
+                    <tr>
+                        <td>B-</td>
+                        <td>能有意識使用「我訊息」，語氣親切但略顯生硬，感受或改善建議描述不足。</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3" class="main-grade">C<br>(普通)</td>
+                        <td>C+</td>
+                        <td>部分展現「我訊息」，能描述行為或立場，但情緒表達或改善建議略顯不足。</td>
+                    </tr>
+                    <tr>
+                        <td>C</td>
+                        <td>能使用「我訊息」的部分語句，但泛泛而談或句向過於簡略，清楚度與一致性不足。</td>
+                    </tr>
+                    <tr>
+                        <td>C-</td>
+                        <td>語句尚可理解，但未見「我訊息」基本結構，溝通效果有限。</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3" class="main-grade">D<br>(待改進)</td>
+                        <td>D+</td>
+                        <td>嘗試進行回應溝通，但語句帶有情緒與模糊評價，無法明確表達自我與觀點。</td>
+                    </tr>
+                    <tr>
+                        <td>D</td>
+                        <td>回應中未見「我訊息」結構，語句造成防衛或對立。</td>
+                    </tr>
+                    <tr>
+                        <td>D-</td>
+                        <td>語句情緒強烈、責怪或否定家長或孩子觀點，導致未能建立有效溝通。</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 三明治溝通法標籤內容 -->
+        <div id="sandwich" class="tab-content">
+            <table class="grading-table">
+                <thead>
+                    <tr>
+                        <th>主等級</th>
+                        <th>細分等級</th>
+                        <th>描述</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td rowspan="3" class="main-grade">A<br>(優秀)</td>
+                        <td>A+</td>
+                        <td>三層結構完整自然，語氣溫和真誠，內容具體深刻，常帶有合作語句。</td>
+                    </tr>
+                    <tr>
+                        <td>A</td>
+                        <td>三層結構清楚，語氣得體、邏輯順暢，有效促進親師理解與正向合作。</td>
+                    </tr>
+                    <tr>
+                        <td>A-</td>
+                        <td>三層皆有，但其中一層稍弱，語氣或內容略顯普通，仍具良好溝通品質。</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3" class="main-grade">B<br>(良好)</td>
+                        <td>B+</td>
+                        <td>三層基本具備，語句清楚但略生硬，內容偏表面，正向語與建議可再強化。</td>
+                    </tr>
+                    <tr>
+                        <td>B</td>
+                        <td>三層結構有，但表現較表面，語氣普通，缺乏個人化或具體建議。</td>
+                    </tr>
+                    <tr>
+                        <td>B-</td>
+                        <td>結構略不平衡，有一層幾乎略過，語氣略顯命令或緊張。</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3" class="main-grade">C<br>(普通)</td>
+                        <td>C+</td>
+                        <td>僅有兩層明顯出現，語氣尚可但內容略顯割裂，缺乏清楚邏輯。</td>
+                    </tr>
+                    <tr>
+                        <td>C</td>
+                        <td>三層皆有但語句模糊、邏輯不清，缺乏溝通策略意識。</td>
+                    </tr>
+                    <tr>
+                        <td>C-</td>
+                        <td>語句雖可理解，但三層結構不穩，情緒與邏輯銜接弱，溝通效果有限。</td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3" class="main-grade">D<br>(待改進)</td>
+                        <td>D+</td>
+                        <td>幾乎只剩建議或批評，正向語缺乏，語氣偏命令或防衛。</td>
+                    </tr>
+                    <tr>
+                        <td>D</td>
+                        <td>未見三層結構，內容以問題或批評為主，親師關係疏離。</td>
+                    </tr>
+                    <tr>
+                        <td>D-</td>
+                        <td>用詞尖銳、責備性強，無正向語句，易引發家長反感或對立。</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 綜合溝通技巧標籤內容 -->
+        <div id="comprehensive" class="tab-content">
+            <div class="criteria-section">
+                <h3>1. 情感表現</h3>
+                <table class="grading-table">
+                    <thead>
+                        <tr>
+                            <th>主等級</th>
+                            <th>描述</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="main-grade">A<br>(優秀)</td>
+                            <td>主動釋出善意，明顯展現理解與同理，語氣溫和尊重，親師關係正向發展。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">B<br>(良好)</td>
+                            <td>願意溝通，語氣基本溫和，有部分回應展現理解但深度稍弱。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">C<br>(普通)</td>
+                            <td>有回應但語氣偏制式，情緒語句或理解語句較少，親師互動效果一般。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">D<br>(待改進)</td>
+                            <td>缺乏同理語句，語氣冷漠或緊張，易引起家長防衛或誤會。</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="criteria-section">
+                <h3>2. 內容回應</h3>
+                <table class="grading-table">
+                    <thead>
+                        <tr>
+                            <th>主等級</th>
+                            <th>描述</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="main-grade">A<br>(優秀)</td>
+                            <td>回應聚焦問題核心，根據家長語意做出恰當補充與引導建立共識，展現高度情境掌握力。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">B<br>(良好)</td>
+                            <td>回應與情境相關，能釐清部分問題並提出合理立場與觀點，但尚未與家長建立共識。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">C<br>(普通)</td>
+                            <td>有基本理解問題，但易停留在表層陳述，缺乏深入回應與引導。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">D<br>(待改進)</td>
+                            <td>內容偏離重點，無法有效處理情境問題，易造成家長混淆或失落。</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="criteria-section">
+                <h3>3. 清晰表達</h3>
+                <table class="grading-table">
+                    <thead>
+                        <tr>
+                            <th>主等級</th>
+                            <th>描述</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="main-grade">A<br>(優秀)</td>
+                            <td>語言表達自然順暢，用詞精準恰當，結構明確，易於理解與建立信任。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">B<br>(良好)</td>
+                            <td>多數語句清楚，用詞尚稱恰當，僅個別語意略顯模糊。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">C<br>(普通)</td>
+                            <td>表達略顯籠統或用詞重複，有理解門檻或可能引起誤解。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">D<br>(待改進)</td>
+                            <td>語句結構混亂、用詞不當或含糊，使家長無法理解教師意圖。</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="criteria-section">
+                <h3>4. 溝通技巧</h3>
+                <table class="grading-table">
+                    <thead>
+                        <tr>
+                            <th>主等級</th>
+                            <th>描述</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="main-grade">A<br>(優秀)</td>
+                            <td>恰當運用「我訊息」、「三明治溝通法」或其他正向溝通技巧，結構自然、效果良好。如無需使用技巧，語氣結構仍具高度專業。</td>
+                        </tr>
+                        <tr>
+                            <td class="main-grade">B<br>(良好)</td>
+                            <td>有意識使用溝通技巧，結構清楚但稍顯制式，或僅使用部分技巧要素。如屬一般對話但語句得體，也可列入此級。</td>
+                        <tr>
+                            <td class="main-grade">C<br>(普通)</td>
+                            <td>使用技巧較不穩定，語句與技巧搭配生硬。如為需技巧場景卻未使用，評為此級。</td>
+                        <tr>
+                            <td class="main-grade">D<br>(待改進)</td>
+                            <td>缺乏技巧意識，或使用方式錯誤，導致效果反向或溝通失敗。</td>
+
+
+
+                            	
+                        
+            </div>
+        </div>
+
+        
+    </div>
+
+    <script>
+        // 顯示選定的標籤內容並隱藏其他標籤內容
+        function showTab(tabId) {
+            // 隱藏所有標籤內容
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // 移除所有標籤的 active 類
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // 顯示選中的標籤內容
+            document.getElementById(tabId).classList.add('active');
+            
+            // 為選中的標籤添加 active 類
+            document.querySelectorAll('.tab').forEach(tab => {
+                if (tab.textContent === getTabName(tabId)) {
+                    tab.classList.add('active');
+                }
+            });
+        }
+
+        // 獲取標籤名稱的幫助函數
+        function getTabName(tabId) {
+            switch(tabId) {
+                case 'i-message': return '我訊息';
+                case 'sandwich': return '三明治溝通法';
+                case 'comprehensive': return '綜合溝通技巧';
+                default: return '';
+            }
+        }
+        
+        // 在文檔加載完成後，獲取用戶名並顯示
+        document.addEventListener('DOMContentLoaded', function() {
+            const welcomeMessage = document.getElementById('welcomeMessage');
+            const username = localStorage.getItem('username');
+            
+            if (username) {
+                welcomeMessage.textContent = `歡迎, ${username}`;
+            }
+            
+            // 登出按鈕事件監聽器
+            document.getElementById('logoutButton').addEventListener('click', function() {
+                localStorage.removeItem('token');
+                localStorage.removeItem('username');
+                localStorage.removeItem('currentPracticeId');
+                window.location.href = '/login';
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>練習詳情 - CommAI系統</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft JhengHei', sans-serif;
+            background: #f5f5f5;
+            line-height: 1.6;
+        }
+
+        .site-banner {
+            background-color: #e93ae1;
+            color: white;
+            text-align: center;
+            padding: 15px 0;
+            font-size: 32px;
+            font-weight: bold;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 80px auto 20px;
+            padding: 20px;
+        }
+
+        .back-button {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #e93ae1;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            transition: background 0.3s;
+        }
+
+        .back-button:hover {
+            background: #d32fd2;
+        }
+
+        .practice-header {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .practice-header h1 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .practice-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .info-item {
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 5px;
+        }
+
+        .info-item label {
+            font-weight: bold;
+            color: #666;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .info-item span {
+            color: #333;
+        }
+
+        .section {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .section h2 {
+            color: #e93ae1;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .metric-card.eye-contact {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .metric-card.smile {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+
+        .metric-card.posture {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }
+
+        .metric-card.gestures {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .metric-value {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .metric-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .progress-bar {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            height: 10px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: white;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+
+        .nonverbal-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .nonverbal-table th {
+            background: #e93ae1;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .nonverbal-table td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .nonverbal-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        .rate-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .rate-excellent {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .rate-good {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .rate-fair {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .rate-poor {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .gesture-tag {
+            display: inline-block;
+            background: #e93ae1;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        .quality-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            font-size: 13px;
+        }
+
+        .quality-indicator i {
+            color: #e93ae1;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .no-data i {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #e93ae1;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="site-banner">
+        CommAI系統 - 練習詳情
+    </div>
+
+    <div class="container">
+        <a href="javascript:history.back()" class="back-button">
+            <i class="fas fa-arrow-left"></i> 返回
+        </a>
+
+        <!-- 載入中 -->
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>載入中...</p>
+        </div>
+
+        <!-- 錯誤訊息 -->
+        <div id="error" class="error-message" style="display: none;"></div>
+
+        <!-- 練習資訊 -->
+        <div id="practiceHeader" class="practice-header" style="display: none;">
+            <h1 id="practiceTitle">練習詳情</h1>
+            <div class="practice-info">
+                <div class="info-item">
+                    <label><i class="fas fa-book"></i> 溝通技巧</label>
+                    <span id="practiceTechnique">-</span>
+                </div>
+                <div class="info-item">
+                    <label><i class="fas fa-calendar"></i> 練習日期</label>
+                    <span id="practiceDate">-</span>
+                </div>
+                <div class="info-item">
+                    <label><i class="fas fa-signal"></i> 難度</label>
+                    <span id="practiceDifficulty">-</span>
+                </div>
+                <div class="info-item">
+                    <label><i class="fas fa-comments"></i> 情境</label>
+                    <span id="practiceScenario">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 非語言數據摘要 -->
+        <div id="summarySection" class="section" style="display: none;">
+            <h2>
+                <i class="fas fa-chart-line"></i>
+                非語言表現摘要
+            </h2>
+            <div class="summary-grid">
+                <div class="metric-card eye-contact">
+                    <div class="metric-label">眼神接觸率</div>
+                    <div class="metric-value" id="summaryEyeContact">-</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressEyeContact"></div>
+                    </div>
+                </div>
+                <div class="metric-card smile">
+                    <div class="metric-label">微笑率</div>
+                    <div class="metric-value" id="summarySmile">-</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressSmile"></div>
+                    </div>
+                </div>
+                <div class="metric-card posture">
+                    <div class="metric-label">開放姿態率</div>
+                    <div class="metric-value" id="summaryPosture">-</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressPosture"></div>
+                    </div>
+                </div>
+                <div class="metric-card gestures">
+                    <div class="metric-label">手勢使用次數</div>
+                    <div class="metric-value" id="summaryGestures">-</div>
+                    <div class="metric-label" id="summaryTurns" style="margin-top: 10px;">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 每輪對話詳細數據 -->
+        <div id="detailsSection" class="section" style="display: none;">
+            <h2>
+                <i class="fas fa-list-alt"></i>
+                每輪對話詳細數據
+            </h2>
+            <table class="nonverbal-table">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">回合</th>
+                        <th style="width: 200px;">對話內容</th>
+                        <th style="width: 100px;">眼神接觸</th>
+                        <th style="width: 100px;">微笑率</th>
+                        <th style="width: 100px;">開放姿態</th>
+                        <th style="width: 120px;">手勢</th>
+                        <th>數據品質</th>
+                    </tr>
+                </thead>
+                <tbody id="nonverbalTableBody">
+                    <!-- 動態填充 -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 無數據提示 -->
+        <div id="noDataSection" class="section" style="display: none;">
+            <div class="no-data">
+                <i class="fas fa-info-circle"></i>
+                <p>此練習沒有非語言數據</p>
+                <p style="font-size: 14px; color: #666; margin-top: 10px;">
+                    請在練習時啟用「非語言偵測」功能以收集數據
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 從 URL 獲取 practice ID
+        const urlParams = new URLSearchParams(window.location.search);
+        const practiceId = urlParams.get('id');
+
+        if (!practiceId) {
+            showError('缺少練習 ID');
+        } else {
+            loadPracticeDetails(practiceId);
+        }
+
+        async function loadPracticeDetails(practiceId) {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) {
+                    window.location.href = '/index.html';
+                    return;
+                }
+
+                const response = await fetch(`/api/nonverbal/practice/${practiceId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.status === 401) {
+                    // Token 無效/過期：清除殘留登入狀態並導回登入頁
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('username');
+                    localStorage.removeItem('currentPracticeId');
+                    localStorage.removeItem('userId');
+                    localStorage.removeItem('userRole');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error('載入練習數據失敗');
+                }
+
+                const data = await response.json();
+                displayPracticeDetails(data);
+
+            } catch (error) {
+                console.error('載入練習詳情失敗:', error);
+                showError('載入練習詳情失敗: ' + error.message);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function displayPracticeDetails(data) {
+            // 顯示練習基本資訊
+            document.getElementById('practiceHeader').style.display = 'block';
+            document.getElementById('practiceTechnique').textContent = data.technique || '未指定';
+            document.getElementById('practiceDate').textContent = formatDate(data.createdAt);
+            document.getElementById('practiceScenario').textContent = data.scenario || '無情境描述';
+
+            // 檢查是否有非語言數據
+            if (!data.hasNonverbalData) {
+                document.getElementById('noDataSection').style.display = 'block';
+                return;
+            }
+
+            // 顯示摘要
+            if (data.summary) {
+                document.getElementById('summarySection').style.display = 'block';
+                displaySummary(data.summary);
+            }
+
+            // 顯示詳細數據
+            if (data.details && data.details.length > 0) {
+                document.getElementById('detailsSection').style.display = 'block';
+                displayDetails(data.details);
+            }
+        }
+
+        function displaySummary(summary) {
+            document.getElementById('summaryEyeContact').textContent = summary.averageEyeContactRate + '%';
+            document.getElementById('summarySmile').textContent = summary.averageSmileRate + '%';
+            document.getElementById('summaryPosture').textContent = summary.averageOpenPostureRate + '%';
+            document.getElementById('summaryGestures').textContent = summary.totalGesturesUsed;
+            document.getElementById('summaryTurns').textContent =
+                `共 ${summary.teacherTurnsWithNonverbalData} 個回合`;
+
+            // 設置進度條
+            document.getElementById('progressEyeContact').style.width = summary.averageEyeContactRate + '%';
+            document.getElementById('progressSmile').style.width = summary.averageSmileRate + '%';
+            document.getElementById('progressPosture').style.width = summary.averageOpenPostureRate + '%';
+        }
+
+        function displayDetails(details) {
+            const tbody = document.getElementById('nonverbalTableBody');
+            tbody.innerHTML = '';
+
+            details.forEach((detail, index) => {
+                const row = document.createElement('tr');
+
+                // 回合數
+                const turnCell = document.createElement('td');
+                turnCell.textContent = `第 ${detail.turnNumber} 輪`;
+                row.appendChild(turnCell);
+
+                // 對話內容
+                const contentCell = document.createElement('td');
+                contentCell.textContent = detail.content;
+                contentCell.style.fontSize = '13px';
+                row.appendChild(contentCell);
+
+                // 眼神接觸
+                const eyeCell = document.createElement('td');
+                eyeCell.innerHTML = createRateBadge(detail.nonverbalData.eyeContactRate);
+                row.appendChild(eyeCell);
+
+                // 微笑率
+                const smileCell = document.createElement('td');
+                smileCell.innerHTML = createRateBadge(detail.nonverbalData.smileRate);
+                row.appendChild(smileCell);
+
+                // 開放姿態
+                const postureCell = document.createElement('td');
+                postureCell.innerHTML = createRateBadge(detail.nonverbalData.openPostureRate);
+                row.appendChild(postureCell);
+
+                // 手勢
+                const gestureCell = document.createElement('td');
+                if (detail.nonverbalData.gesturesUsed > 0) {
+                    gestureCell.innerHTML = createGestureTags(detail.nonverbalData.gesturesList);
+                } else {
+                    gestureCell.textContent = '無';
+                    gestureCell.style.color = '#999';
+                }
+                row.appendChild(gestureCell);
+
+                // 數據品質
+                const qualityCell = document.createElement('td');
+                if (detail.nonverbalData.dataQuality) {
+                    qualityCell.innerHTML = createQualityIndicator(detail.nonverbalData.dataQuality);
+                } else {
+                    qualityCell.textContent = '-';
+                }
+                row.appendChild(qualityCell);
+
+                tbody.appendChild(row);
+            });
+        }
+
+        function createRateBadge(rate) {
+            let className = 'rate-fair';
+            if (rate >= 80) className = 'rate-excellent';
+            else if (rate >= 60) className = 'rate-good';
+            else if (rate < 40) className = 'rate-poor';
+
+            return `<span class="rate-badge ${className}">${rate}%</span>`;
+        }
+
+        function createGestureTags(gesturesList) {
+            if (!gesturesList || gesturesList.length === 0) {
+                return '無';
+            }
+
+            const gestureNames = {
+                'Thumb_Up': '👍 讚',
+                'Victory': '✌️ 勝利',
+                'Open_Palm': '✋ 開放手掌',
+                'Closed_Fist': '✊ 握拳',
+                'Pointing_Up': '☝️ 指向'
+            };
+
+            const uniqueGestures = [...new Set(gesturesList.map(g => g.name))];
+            return uniqueGestures
+                .map(name => `<span class="gesture-tag">${gestureNames[name] || name}</span>`)
+                .join('');
+        }
+
+        function createQualityIndicator(quality) {
+            const faceRate = quality.faceDetectionRate || 0;
+            const duration = quality.duration || 0;
+
+            let icon = 'fa-check-circle';
+            let color = '#28a745';
+            if (faceRate < 70) {
+                icon = 'fa-exclamation-triangle';
+                color = '#ffc107';
+            }
+            if (faceRate < 50) {
+                icon = 'fa-times-circle';
+                color = '#dc3545';
+            }
+
+            return `
+                <div style="font-size: 12px; color: #666;">
+                    <i class="fas ${icon}" style="color: ${color};"></i>
+                    臉部偵測: ${faceRate}%<br>
+                    錄音時長: ${duration}秒
+                </div>
+            `;
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleString('zh-TW', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function showError(message) {
+            document.getElementById('error').textContent = message;
+            document.getElementById('error').style.display = 'block';
+        }
+    </script>
+</body>
+</html>

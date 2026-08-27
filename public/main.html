@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CommAI系統 - 主頁</title>
+    <script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/s05kb253j7";
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "s05kb253j7");
+    </script>
+    <script src="/js/chartjs-loader.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft JhengHei', sans-serif;
+            background: white;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .site-banner {
+            background-color: #e93ae1;
+            color: white;
+            text-align: center;
+            padding: 15px 0;
+            font-size: 32px;
+            font-weight: bold;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 80px auto 0;
+            padding: 20px;
+        }
+
+        .welcome-section {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .welcome-section h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .techniques-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .technique-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .technique-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .technique-card h2 {
+            color: #e93ae1;
+            margin-bottom: 15px;
+        }
+
+        .technique-card p {
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .logout-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: #e93ae1;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            z-index: 1001;
+        }
+
+        .logout-button:hover {
+            background: #d32f2f;
+        }
+    </style>
+</head>
+<body>
+    <div class="site-banner">
+        CommAI系統
+    </div>
+    <button id="logout-button" class="logout-button">登出</button>
+    <div class="container">
+        <div class="welcome-section">
+            <h1 id="user-welcome">歡迎!</h1>
+        </div>
+
+        <div class="techniques-grid">
+            <a href="/i-message.html" class="technique-card">
+                <h2>我訊息溝通技巧</h2>
+                <p>學習如何以「我訊息」的方式表達感受與需求，建立更有效的溝通。</p>
+            </a>
+            <a href="/sandwich.html" class="technique-card">
+                <h2>三明治溝通技巧</h2>
+                <p>掌握「正向–建設性–正向」的溝通結構，讓對話更溫和有效。</p>
+            </a>
+            <a href="/comprehensive.html" class="technique-card">
+                <h2>綜合溝通技巧</h2>
+                <p>整合情感、內容、語言與策略，提升整體溝通能力。</p>
+            </a>
+            <a href="/nonverbal-dashboard.html" class="technique-card" style="border: 2px solid #e93ae1;">
+                <h2><i class="fas fa-chart-line"></i> 非語言表現儀表板</h2>
+                <p>查看您的非語言溝通表現統計,追蹤眼神接觸、微笑和姿態的進步趨勢。</p>
+            </a>
+        </div>
+    </div>
+
+    <script>
+        async function validateSession() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                alert('尚未登入，將跳轉至登入頁面');
+                window.location.href = '/login';
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/verify', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error('驗證失敗');
+                }
+
+                document.getElementById('user-welcome').textContent = `歡迎, ${data.user.username}`;
+            } catch (error) {
+                alert('驗證失敗，請重新登入');
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            }
+        }
+
+        document.getElementById('logout-button').addEventListener('click', () => {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        });
+
+        validateSession();
+    </script>
+</body>
+</html>

@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>非語言表現儀表板 - CommAI系統</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft JhengHei', sans-serif;
+            background: #f5f5f5;
+            line-height: 1.6;
+        }
+
+        .site-banner {
+            background-color: #e93ae1;
+            color: white;
+            text-align: center;
+            padding: 15px 0;
+            font-size: 32px;
+            font-weight: bold;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 80px auto 20px;
+            padding: 20px;
+        }
+
+        .back-button {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #e93ae1;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            transition: background 0.3s;
+        }
+
+        .back-button:hover {
+            background: #d32fd2;
+        }
+
+        .section {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .section h2 {
+            color: #e93ae1;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-card.primary {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .stat-card.success {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+
+        .stat-card.warning {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }
+
+        .stat-card.info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .stat-value {
+            font-size: 42px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .stat-label {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        .stat-sub {
+            font-size: 13px;
+            opacity: 0.8;
+            margin-top: 8px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-top: 20px;
+        }
+
+        .technique-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .technique-tab {
+            padding: 10px 20px;
+            border: 2px solid #e93ae1;
+            background: white;
+            color: #e93ae1;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .technique-tab.active {
+            background: #e93ae1;
+            color: white;
+        }
+
+        .technique-tab:hover {
+            transform: translateY(-2px);
+        }
+
+        .best-performances {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .best-card {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #e93ae1;
+        }
+
+        .best-card h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .best-score {
+            font-size: 32px;
+            font-weight: bold;
+            color: #e93ae1;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #e93ae1;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .no-data i {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="site-banner">
+        非語言表現儀表板
+    </div>
+
+    <div class="container">
+        <a href="main.html" class="back-button">
+            <i class="fas fa-arrow-left"></i> 返回主頁
+        </a>
+
+        <!-- 載入中 -->
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>載入統計數據中...</p>
+        </div>
+
+        <!-- 錯誤訊息 -->
+        <div id="error" class="error-message" style="display: none;"></div>
+
+        <!-- 無數據提示 -->
+        <div id="noData" class="no-data" style="display: none;">
+            <i class="fas fa-chart-line"></i>
+            <h2>尚無非語言數據</h2>
+            <p style="margin-top: 10px;">
+                請在練習時啟用「非語言偵測」功能開始收集數據
+            </p>
+        </div>
+
+        <!-- 整體統計 -->
+        <div id="overallStats" class="section" style="display: none;">
+            <h2>
+                <i class="fas fa-chart-pie"></i>
+                整體表現統計
+            </h2>
+            <div class="stats-grid">
+                <div class="stat-card primary">
+                    <div class="stat-label">平均眼神接觸率</div>
+                    <div class="stat-value" id="avgEyeContact">-</div>
+                    <div class="stat-sub" id="eyeContactPractices">-</div>
+                </div>
+                <div class="stat-card success">
+                    <div class="stat-label">平均微笑率</div>
+                    <div class="stat-value" id="avgSmile">-</div>
+                    <div class="stat-sub" id="smilePractices">-</div>
+                </div>
+                <div class="stat-card warning">
+                    <div class="stat-label">平均開放姿態率</div>
+                    <div class="stat-value" id="avgPosture">-</div>
+                    <div class="stat-sub" id="posturePractices">-</div>
+                </div>
+                <div class="stat-card info">
+                    <div class="stat-label">總手勢使用次數</div>
+                    <div class="stat-value" id="totalGestures">-</div>
+                    <div class="stat-sub" id="avgGestures">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 最佳表現 -->
+        <div id="bestPerformances" class="section" style="display: none;">
+            <h2>
+                <i class="fas fa-trophy"></i>
+                最佳表現記錄
+            </h2>
+            <div class="best-performances">
+                <div class="best-card">
+                    <h3><i class="fas fa-eye"></i> 最佳眼神接觸</h3>
+                    <div class="best-score" id="bestEyeContact">-</div>
+                    <div style="margin-top: 10px; color: #666; font-size: 13px;" id="bestEyeContactInfo">-</div>
+                </div>
+                <div class="best-card">
+                    <h3><i class="fas fa-smile"></i> 最佳微笑率</h3>
+                    <div class="best-score" id="bestSmile">-</div>
+                    <div style="margin-top: 10px; color: #666; font-size: 13px;" id="bestSmileInfo">-</div>
+                </div>
+                <div class="best-card">
+                    <h3><i class="fas fa-user"></i> 最佳開放姿態</h3>
+                    <div class="best-score" id="bestPosture">-</div>
+                    <div style="margin-top: 10px; color: #666; font-size: 13px;" id="bestPostureInfo">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 進步趨勢 -->
+        <div id="progressSection" class="section" style="display: none;">
+            <h2>
+                <i class="fas fa-chart-line"></i>
+                進步趨勢分析
+            </h2>
+            <div class="technique-tabs" id="techniqueTabs">
+                <!-- 動態生成 -->
+            </div>
+            <div class="chart-container">
+                <canvas id="progressChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 按技巧統計 -->
+        <div id="byTechniqueSection" class="section" style="display: none;">
+            <h2>
+                <i class="fas fa-layer-group"></i>
+                按技巧分類統計
+            </h2>
+            <div id="techniqueStats">
+                <!-- 動態生成 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let progressChart = null;
+        let currentTechnique = 'all';
+
+        // 載入統計數據
+        loadStatistics();
+        loadProgress();
+
+        async function loadStatistics() {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) {
+                    window.location.href = '/index.html';
+                    return;
+                }
+
+                const response = await fetch('/api/nonverbal/stats', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('載入統計數據失敗');
+                }
+
+                const data = await response.json();
+
+                if (!data.stats) {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('noData').style.display = 'block';
+                    return;
+                }
+
+                displayStatistics(data.stats);
+
+            } catch (error) {
+                console.error('載入統計數據失敗:', error);
+                showError('載入統計數據失敗: ' + error.message);
+            }
+        }
+
+        async function loadProgress(technique = 'all') {
+            try {
+                const token = localStorage.getItem('token');
+                const url = technique === 'all'
+                    ? '/api/nonverbal/progress'
+                    : `/api/nonverbal/progress?technique=${encodeURIComponent(technique)}`;
+
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('載入進步數據失敗');
+                }
+
+                const data = await response.json();
+
+                if (data.progressData && data.progressData.length > 0) {
+                    document.getElementById('progressSection').style.display = 'block';
+                    displayProgressChart(data.progressData);
+                }
+
+            } catch (error) {
+                console.error('載入進步數據失敗:', error);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function displayStatistics(stats) {
+            // 整體統計
+            document.getElementById('overallStats').style.display = 'block';
+            document.getElementById('avgEyeContact').textContent = stats.overall.averageEyeContactRate + '%';
+            document.getElementById('avgSmile').textContent = stats.overall.averageSmileRate + '%';
+            document.getElementById('avgPosture').textContent = stats.overall.averageOpenPostureRate + '%';
+            document.getElementById('totalGestures').textContent = stats.overall.totalGesturesUsed;
+
+            const practiceCount = stats.overall.totalPractices;
+            document.getElementById('eyeContactPractices').textContent = `共 ${practiceCount} 次練習`;
+            document.getElementById('smilePractices').textContent = `共 ${practiceCount} 次練習`;
+            document.getElementById('posturePractices').textContent = `共 ${practiceCount} 次練習`;
+            document.getElementById('avgGestures').textContent =
+                `平均 ${stats.overall.averageGesturesPerPractice} 次/練習`;
+
+            // 最佳表現
+            if (stats.bestPerformances) {
+                document.getElementById('bestPerformances').style.display = 'block';
+                document.getElementById('bestEyeContact').textContent =
+                    stats.bestPerformances.eyeContact.rate + '%';
+                document.getElementById('bestSmile').textContent =
+                    stats.bestPerformances.smile.rate + '%';
+                document.getElementById('bestPosture').textContent =
+                    stats.bestPerformances.posture.rate + '%';
+            }
+
+            // 按技巧統計
+            if (stats.byTechnique && Object.keys(stats.byTechnique).length > 0) {
+                document.getElementById('byTechniqueSection').style.display = 'block';
+                displayTechniqueStats(stats.byTechnique);
+                createTechniqueTabs(Object.keys(stats.byTechnique));
+            }
+        }
+
+        function displayTechniqueStats(byTechnique) {
+            const container = document.getElementById('techniqueStats');
+            container.innerHTML = '';
+
+            Object.keys(byTechnique).forEach(technique => {
+                const data = byTechnique[technique];
+                const card = document.createElement('div');
+                card.className = 'best-card';
+                card.style.marginBottom = '15px';
+
+                card.innerHTML = `
+                    <h3><i class="fas fa-book"></i> ${technique}</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 15px;">
+                        <div style="text-align: center; padding: 10px; background: white; border-radius: 5px;">
+                            <div style="font-size: 11px; color: #666;">眼神接觸</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #4facfe;">${data.averageEyeContactRate}%</div>
+                        </div>
+                        <div style="text-align: center; padding: 10px; background: white; border-radius: 5px;">
+                            <div style="font-size: 11px; color: #666;">微笑率</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #43e97b;">${data.averageSmileRate}%</div>
+                        </div>
+                        <div style="text-align: center; padding: 10px; background: white; border-radius: 5px;">
+                            <div style="font-size: 11px; color: #666;">開放姿態</div>
+                            <div style="font-size: 20px; font-weight: bold; color: #fa709a;">${data.averageOpenPostureRate}%</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px; font-size: 13px; color: #666;">
+                        共 ${data.practiceCount} 次練習
+                    </div>
+                `;
+
+                container.appendChild(card);
+            });
+        }
+
+        function createTechniqueTabs(techniques) {
+            const container = document.getElementById('techniqueTabs');
+            container.innerHTML = '';
+
+            // 新增「全部」選項
+            const allTab = document.createElement('div');
+            allTab.className = 'technique-tab active';
+            allTab.textContent = '全部';
+            allTab.onclick = () => switchTechnique('all', allTab);
+            container.appendChild(allTab);
+
+            techniques.forEach(technique => {
+                const tab = document.createElement('div');
+                tab.className = 'technique-tab';
+                tab.textContent = technique;
+                tab.onclick = () => switchTechnique(technique, tab);
+                container.appendChild(tab);
+            });
+        }
+
+        function switchTechnique(technique, tabElement) {
+            currentTechnique = technique;
+
+            // 更新選中狀態
+            document.querySelectorAll('.technique-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            tabElement.classList.add('active');
+
+            // 載入該技巧的進度數據
+            loadProgress(technique);
+        }
+
+        function displayProgressChart(progressData) {
+            const ctx = document.getElementById('progressChart');
+            if (!ctx) return;
+
+            // 銷毀舊圖表
+            if (progressChart) {
+                progressChart.destroy();
+            }
+
+            const labels = progressData.map((p, i) => `第${p.practiceNumber}次`);
+            const eyeContactData = progressData.map(p => p.metrics.eyeContactRate);
+            const smileData = progressData.map(p => p.metrics.smileRate);
+            const postureData = progressData.map(p => p.metrics.openPostureRate);
+
+            progressChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '眼神接觸率',
+                            data: eyeContactData,
+                            borderColor: '#4facfe',
+                            backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: '微笑率',
+                            data: smileData,
+                            borderColor: '#43e97b',
+                            backgroundColor: 'rgba(67, 233, 123, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: '開放姿態率',
+                            data: postureData,
+                            borderColor: '#fa709a',
+                            backgroundColor: 'rgba(250, 112, 154, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: currentTechnique === 'all'
+                                ? '所有技巧的進步趨勢'
+                                : `${currentTechnique} - 進步趨勢`,
+                            font: { size: 16 }
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function showError(message) {
+            document.getElementById('error').textContent = message;
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

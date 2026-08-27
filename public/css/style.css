@@ -1,0 +1,28 @@
+.retry-button-container {
+    margin: 20px 0;
+    text-align: center;
+}
+
+.retry-main-btn {
+    background-color: #4CAF50;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s;
+}
+
+.retry-main-btn:hover {
+    background-color: #45a049;
+}
+
+.retry-badge {
+    background-color: #ff9800;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    margin-left: 8px;
+} 

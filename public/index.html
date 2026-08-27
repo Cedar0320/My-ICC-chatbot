@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CommAI系統 - 登入/註冊</title>
+    <script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/s05kb253j7";
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "s05kb253j7");
+    </script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft JhengHei', sans-serif;
+            background: white;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .site-banner {
+            background-color: #e93ae1; /* 綠色背景 */
+            color: white; /* 文字白色 */
+            text-align: center; /* 文字置中 */
+            padding: 15px 0; /* 上下內邊距 */
+            font-size:32px; /* 文字大小 */
+            font-weight: bold; /* 粗體 */
+            position: fixed; /* 固定在頁面頂部 */
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000; /* 確保在其他元素之上 */
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2); /* 添加陰影效果 */
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 400px;
+            padding-top: 60px;
+        }
+
+        .tab-container {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: bold;
+            color: #666;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            color: #e93ae1;
+            border-bottom: 2px solid #e93ae1;
+            margin-bottom: -2px;
+        }
+
+        .form-container {
+            display: none;
+        }
+
+        .form-container.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .form-group i {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 15px 12px 45px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-control:focus {
+            border-color: #e93ae1;
+            outline: none;
+            box-shadow: 0 0 5px rgba(76, 175, 80, 0.3);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: #e93ae1;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .btn:hover {
+            background: #e93ae1;
+        }
+
+        .message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            display: none;
+        }
+
+        .message.error {
+            background: #ffebee;
+            color: #c62828;
+            display: block;
+        }
+
+        .message.success {
+            background: #e8f5e9;
+            color: #e93ae1;
+            display: block;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr); /* 兩列 */
+            gap: 20px; /* 欄位間距 */
+        }
+
+        .form-group {
+            margin-bottom: 10px;
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .form-group i {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #666;
+        }
+
+        .form-group .form-control {
+            padding-left: 45px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 600px) {
+            .form-grid {
+                grid-template-columns: 1fr; /* 單列佈局 */
+            }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #e93ae1;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <img src="/jpg/commai.png" alt="Login Page Image" />
+    <div class="site-banner">
+        CommAI系統
+    </div>
+    <div class="container">
+
+        <!-- <header class="title">ICC師生溝通建置系統</header> -->
+        
+        <div class="tab-container">
+            
+            <div class="tab active" data-form="login">登入</div>
+            <div class="tab" data-form="register">註冊</div>
+        </div>
+
+        <!-- 登入表單 -->
+        <div class="form-container active" id="loginForm">
+            <form onsubmit="return handleLogin(event)">
+                <div class="form-group">
+                    <i class="fas fa-envelope"></i>
+                    <input type="email" class="form-control" id="loginEmail" 
+                           placeholder="電子郵件" required>
+                </div>
+                <div class="form-group">
+                    <i class="fas fa-lock"></i>
+                    <input type="password" class="form-control" id="loginPassword" 
+                           placeholder="密碼" required>
+                </div>
+
+                <!-- 忘記密碼連結 -->
+                <div style="text-align: right; margin-bottom: 15px;">
+                    <a href="/forgot-password.html" style="color: #e93ae1; text-decoration: none; font-size: 14px;">
+                        忘記密碼？
+                    </a>
+                </div>
+                <button type="submit" class="btn">登入</button>
+                <div class="loading" id="loginLoading">
+                    <div class="spinner"></div>
+                </div>
+                <div class="message" id="loginMessage"></div>
+            </form>
+        </div>
+
+        <!-- 註冊表單 -->
+        <div class="form-container" id="registerForm">
+            <form onsubmit="return handleRegister(event)">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <i class="fas fa-user"></i>
+                        <input type="text" class="form-control" id="registerUsername" placeholder="使用者名稱" required>
+                    </div>
+                    <div class="form-group">
+                        <i class="fas fa-envelope"></i>
+                        <input type="email" class="form-control" id="registerEmail" placeholder="電子郵件" required>
+                    </div>
+                    <div class="form-group">
+                        <i class="fas fa-lock"></i>
+                        <input type="password" class="form-control" id="registerPassword" placeholder="密碼" required minlength="6">
+                    </div>
+                    <div class="form-group">
+                        <i class="fas fa-id-card"></i>
+                        <input type="text" class="form-control" id="registerStudentId" placeholder="學號" required>
+                    </div>
+                    <div class="form-group">
+                        <i class="fas fa-venus-mars"></i>
+                        <select class="form-control" id="registerGender" required>
+                            <option value="" disabled selected>性別</option>
+                            <option value="male">男</option>
+                            <option value="female">女</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <i class="fas fa-graduation-cap"></i>
+                        <select class="form-control" id="registerEducationLevel" required onchange="updateGradeOptions()">
+                            <option value="" disabled selected>學制</option>
+                            <option value="undergraduate">大學部</option>
+                            <option value="master">碩士</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <i class="fas fa-building"></i>
+                        <input type="text" class="form-control" id="registerDepartment" placeholder="系所" required>
+                    </div>
+                    <div class="form-group">
+                        <i class="fas fa-sort-numeric-up"></i>
+                        <select class="form-control" id="registerGrade" required>
+                            <option value="" disabled selected>年級</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn">註冊</button>
+                <div class="loading" id="registerLoading">
+                    <div class="spinner"></div>
+                </div>
+                <div class="message" id="registerMessage"></div>
+            </form>
+        </div>
+
+    <script>
+                       // 切換表單的功能
+                       document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // 移除所有active類
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.form-container').forEach(f => f.classList.remove('active'));
+                
+                // 添加active類到當前項
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.form + 'Form').classList.add('active');
+                
+                // 清除消息
+                document.querySelectorAll('.message').forEach(m => {
+                    m.textContent = '';
+                    m.className = 'message';
+                });
+            });
+        });
+
+        // 登入處理
+        async function handleLogin(event) {
+            
+        event.preventDefault();
+        const loading = document.getElementById('loginLoading');
+        const message = document.getElementById('loginMessage');
+        
+        loading.classList.add('active');
+        message.className = 'message';
+        
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: document.getElementById('loginEmail').value,
+                    password: document.getElementById('loginPassword').value
+                })
+            });
+
+            const data = await response.json();
+            
+            if (data.success) {
+
+                localStorage.setItem('token', data.token);
+                localStorage.setItem('username', data.user.username);
+                localStorage.setItem('userId', data.user.id);  // 保存用戶 ID
+                localStorage.setItem('userRole', data.user.role);  // 保存用戶角色
+
+                message.textContent = '登入成功！正在跳轉...';
+                message.classList.add('success');
+
+                // 根據角色跳轉到不同頁面
+                const redirectUrl = data.user.role === 'admin' ? '/admin-dashboard.html' : '/test';
+                setTimeout(() => window.location.href = redirectUrl, 1000);
+
+            } else {
+                throw new Error(data.message || '登入失敗');
+            }
+        } catch (error) {
+            message.textContent = error.message;
+            message.classList.add('error');
+        } finally {
+            loading.classList.remove('active');
+        }
+        return false;
+    }
+
+    function updateGradeOptions() {
+        const educationLevel = document.getElementById('registerEducationLevel').value;
+        const gradeSelect = document.getElementById('registerGrade');
+
+        // 清空之前的選項
+        gradeSelect.innerHTML = '<option value="" disabled selected>年級</option>';
+
+        // 根據學制添加相應的年級選項
+        if (educationLevel === 'undergraduate') {
+            gradeSelect.innerHTML += '<option value="1">大一</option>';
+            gradeSelect.innerHTML += '<option value="2">大二</option>';
+            gradeSelect.innerHTML += '<option value="3">大三</option>';
+            gradeSelect.innerHTML += '<option value="4">大四</option>';
+        } else if (educationLevel === 'master') {
+            gradeSelect.innerHTML += '<option value="5">碩一 (含夜碩)</option>';
+            gradeSelect.innerHTML += '<option value="6">碩二 (含夜碩)</option>';
+            gradeSelect.innerHTML += '<option value="7">碩三 (含夜碩)</option>';
+        }
+    }
+        async function handleRegister(event) {
+        event.preventDefault();
+        const loading = document.getElementById('registerLoading');
+        const message = document.getElementById('registerMessage');
+        
+        loading.classList.add('active');
+        message.className = 'message';
+        
+            try {
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: document.getElementById('registerUsername').value,
+                        email: document.getElementById('registerEmail').value,
+                        password: document.getElementById('registerPassword').value,
+                        studentId: document.getElementById('registerStudentId').value,
+                        gender: document.getElementById('registerGender').value,
+                        educationLevel: document.getElementById('registerEducationLevel').value,
+                        department: document.getElementById('registerDepartment').value,
+                        grade: document.getElementById('registerGrade').value
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    message.textContent = '註冊成功！請登入';
+                    message.classList.add('success');
+                    setTimeout(() => {
+                        document.querySelector('[data-form="login"]').click();
+                    }, 1500);
+                } else {
+                    throw new Error(data.message || '註冊失敗');
+                }
+            } catch (error) {
+                message.textContent = error.message;
+                message.classList.add('error');
+            } finally {
+                loading.classList.remove('active');
+            }
+            return false;
+        }
+
+        // 檢查是否已登入（需先驗證 token 是否有效，避免殘留過期 token 造成 401）
+        async function checkAuth() {
+            const token = localStorage.getItem('token');
+            if (!token) return;
+
+            try {
+                const res = await fetch('/api/auth/verify', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!res.ok) {
+                    throw new Error('Token 無效或已過期');
+                }
+
+                const data = await res.json();
+                if (!data || !data.success || !data.user) {
+                    throw new Error('Token 驗證失敗');
+                }
+
+                // 補齊 localStorage（避免舊資料缺欄位）
+                localStorage.setItem('username', data.user.username);
+                localStorage.setItem('userId', data.user._id || data.user.id);
+                localStorage.setItem('userRole', data.user.role);
+
+                const redirectUrl = data.user.role === 'admin' ? '/admin-dashboard.html' : '/test';
+                window.location.href = redirectUrl;
+            } catch (e) {
+                // 清除過期 token，避免被誤判為已登入
+                localStorage.removeItem('token');
+                localStorage.removeItem('username');
+                localStorage.removeItem('currentPracticeId');
+                localStorage.removeItem('userId');
+                localStorage.removeItem('userRole');
+            }
+        }
+
+        // 頁面載入時檢查登入狀態
+        checkAuth();
+
+    </script>
+</body>
+</html>

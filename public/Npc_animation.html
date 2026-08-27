@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NPC 像素角色動畫演示</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: "Microsoft JhengHei", sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .demo-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .avatar-section {
+            display: flex;
+            gap: 30px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .npc-avatar-container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            padding: 15px;
+            margin: 0 auto;
+        }
+
+        .npc-avatar-container img {
+            max-width: 100%;
+            max-height: 100%;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            object-fit: contain;
+        }
+
+        .npc-status-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 12px;
+            height: 12px;
+            background: #4caf50;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
+
+        .npc-status-indicator.talking {
+            background: #ff9800;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.2); }
+        }
+
+        .controls {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+
+        .info-box h3 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+
+        .info-box p {
+            margin: 5px 0;
+            color: #555;
+        }
+
+        .chat-demo {
+            background: #f9f9f9;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .message {
+            background: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .message.parent {
+            border-left: 4px solid #ff9800;
+        }
+
+        .status-text {
+            text-align: center;
+            padding: 10px;
+            margin: 10px 0;
+            background: #fff3e0;
+            border-radius: 8px;
+            color: #e65100;
+            font-weight: bold;
+        }
+
+        input[type="range"] {
+            width: 100%;
+        }
+
+        .speed-value {
+            display: inline-block;
+            margin-left: 10px;
+            color: #667eea;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <h1>🎭 NPC 像素角色動畫演示</h1>
+        <p class="subtitle">展示像素角色如何配合語音進行說話動畫</p>
+
+        <!-- NPC角色顯示區 -->
+        <div class="npc-avatar-container">
+            <div class="npc-status-indicator" id="npcStatus"></div>
+            <img id="npcAvatar" src="/assets/parent3-1.png" alt="NPC角色" 
+                 onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2NjYyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0iIzY2NiI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'">
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="controls">
+            <h3>🎮 控制面板</h3>
+            
+            <div class="control-group">
+                <button onclick="startAnimation()">▶️ 開始說話動畫</button>
+                <button onclick="stopAnimation()">⏹️ 停止動畫</button>
+            </div>
+
+            <div class="control-group">
+                <button onclick="testWithAudio()">🎵 測試音訊+動畫</button>
+            </div>
+
+            <div class="control-group">
+                <label>動畫速度：<span class="speed-value" id="speedValue">150ms</span></label>
+                <input type="range" id="speedSlider" min="50" max="300" value="150" 
+                       oninput="updateSpeed(this.value)">
+            </div>
+        </div>
+
+        <!-- 狀態顯示 -->
+        <div class="status-text" id="statusText">
+            ⏸️ 動畫已停止
+        </div>
+
+        <!-- 說明信息 -->
+        <div class="info-box">
+            <h3>📖 功能說明</h3>
+            <p><strong>說話動畫：</strong>循環切換2-3張圖片，模擬說話的嘴部動作</p>
+            <p><strong>狀態指示：</strong>右上角圓點會在說話時變成橙色並閃爍</p>
+            <p><strong>音訊同步：</strong>音訊播放時自動開始動畫，結束時自動停止</p>
+            <p><strong>圖片要求：</strong>需要準備 parent3-1.png (靜止), parent3-2.png, parent3-3.png (說話幀)</p>
+        </div>
+
+        <!-- 演示對話 -->
+        <div class="chat-demo" id="chatDemo">
+            <h3>💬 對話演示</h3>
+            <div class="message parent">
+                <strong>👤 家長：</strong> 老師好，我想跟您討論一下我孩子的學習問題。
+            </div>
+        </div>
+    </div>
+
+    <!-- 隱藏的音訊播放器 -->
+    <audio id="audioPlayer" style="display: none;"></audio>
+
+    <script>
+        // 簡化版的 NPC 動畫控制器
+        class SimplifiedNPCController {
+            constructor() {
+                this.avatarImg = document.getElementById('npcAvatar');
+                this.statusIndicator = document.getElementById('npcStatus');
+                this.statusText = document.getElementById('statusText');
+                this.audioPlayer = document.getElementById('audioPlayer');
+                
+                this.isAnimating = false;
+                this.animationInterval = null;
+                this.frameInterval = 150;
+                this.currentFrame = 0;
+                
+                // 圖片路徑（這裡使用佔位符，實際使用時需要真實圖片）
+                this.images = {
+                    idle: '/assets/parent3-1.png',
+                    talkFrames: [
+                        '/assets/parent3-2.png',
+                        '/assets/parent3-3.png'
+                    ]
+                };
+                
+                this.setupAudioEvents();
+                console.log('✅ NPC 控制器初始化完成');
+            }
+            
+            setupAudioEvents() {
+                this.audioPlayer.addEventListener('play', () => {
+                    console.log('🎵 音訊開始播放');
+                    this.startTalkingAnimation();
+                });
+                
+                this.audioPlayer.addEventListener('ended', () => {
+                    console.log('✅ 音訊播放結束');
+                    this.stopTalkingAnimation();
+                });
+            }
+            
+            startTalkingAnimation() {
+                if (this.isAnimating) return;
+                
+                this.isAnimating = true;
+                this.currentFrame = 0;
+                
+                this.statusIndicator.classList.add('talking');
+                this.statusText.innerHTML = '🗣️ 正在說話中...';
+                this.statusText.style.background = '#fff3e0';
+                this.statusText.style.color = '#e65100';
+                
+                this.animationInterval = setInterval(() => {
+                    const frameIndex = this.currentFrame % this.images.talkFrames.length;
+                    this.avatarImg.src = this.images.talkFrames[frameIndex];
+                    this.currentFrame++;
+                }, this.frameInterval);
+                
+                console.log('▶️ 說話動畫已啟動');
+            }
+            
+            stopTalkingAnimation() {
+                if (!this.isAnimating) return;
+                
+                this.isAnimating = false;
+                
+                if (this.animationInterval) {
+                    clearInterval(this.animationInterval);
+                    this.animationInterval = null;
+                }
+                
+                this.avatarImg.src = this.images.idle;
+                this.statusIndicator.classList.remove('talking');
+                this.statusText.innerHTML = '⏸️ 動畫已停止';
+                this.statusText.style.background = '#e8f5e9';
+                this.statusText.style.color = '#2e7d32';
+                
+                this.currentFrame = 0;
+                console.log('⏹️ 說話動畫已停止');
+            }
+            
+            setSpeed(interval) {
+                this.frameInterval = interval;
+                if (this.isAnimating) {
+                    this.stopTalkingAnimation();
+                    this.startTalkingAnimation();
+                }
+            }
+            
+            playAudioWithAnimation(audioUrl) {
+                this.audioPlayer.src = audioUrl;
+                this.audioPlayer.play().catch(error => {
+                    console.error('❌ 音訊播放失敗:', error);
+                    alert('音訊播放失敗，請檢查音訊文件路徑');
+                });
+            }
+        }
+        
+        // 初始化控制器
+        let npcController;
+        window.addEventListener('DOMContentLoaded', () => {
+            npcController = new SimplifiedNPCController();
+        });
+        
+        // 控制函數
+        function startAnimation() {
+            if (npcController) {
+                npcController.startTalkingAnimation();
+                
+                // 3秒後自動停止（演示用）
+                setTimeout(() => {
+                    if (npcController.isAnimating) {
+                        npcController.stopTalkingAnimation();
+                    }
+                }, 3000);
+            }
+        }
+        
+        function stopAnimation() {
+            if (npcController) {
+                npcController.stopTalkingAnimation();
+            }
+        }
+        
+        function updateSpeed(value) {
+            document.getElementById('speedValue').textContent = value + 'ms';
+            if (npcController) {
+                npcController.setSpeed(parseInt(value));
+            }
+        }
+        
+        function testWithAudio() {
+            // 這裡需要提供一個真實的音訊URL
+            const audioUrl = '/temp/speech-1748878257012.mp3'; // 請替換為實際的音訊文件路徑  C:\speech-to-text-app\temp\speech-1748878257012.mp3
+            
+            if (npcController) {
+                npcController.playAudioWithAnimation(audioUrl);
+                
+                // 添加演示訊息
+                const chatDemo = document.getElementById('chatDemo');
+                const message = document.createElement('div');
+                message.className = 'message parent';
+                message.innerHTML = '<strong>👤 家長：</strong> 這是一段測試語音，展示角色說話動畫效果。';
+                chatDemo.appendChild(message);
+                chatDemo.scrollTop = chatDemo.scrollHeight;
+            }
+        }
+        
+        // 鍵盤快捷鍵
+        document.addEventListener('keydown', (e) => {
+            if (e.key === ' ') { // 空格鍵
+                e.preventDefault();
+                if (npcController && npcController.isAnimating) {
+                    stopAnimation();
+                } else {
+                    startAnimation();
+                }
+            }
+        });
+        
+        console.log('💡 提示：按空格鍵可快速開始/停止動畫');
+    </script>
+</body>
+</html>

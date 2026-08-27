@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill /PID 7056 /F)",
+      "Bash(taskkill:*)",
+      "Bash(npm start)",
+      "Bash(timeout /t 3)",
+      "Bash(node app.js:*)",
+      "Bash(dir:*)",
+      "Bash(node scripts/createAdminUser.js:*)",
+      "Bash(node scripts/updateUserRoles.js:*)",
+      "Bash(npm install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

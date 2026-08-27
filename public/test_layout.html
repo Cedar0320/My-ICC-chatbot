@@ -1,0 +1,1169 @@
+<!-- <!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 模擬練習 - Avatar 互動測試</title>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <style>
+        /* --- 1. 全局設定 --- */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            font-family: 'Microsoft JhengHei', 'Segoe UI', sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        /* --- 2. 主佈局容器 --- */
+        .interaction-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* --- 3. 左側：Avatar 區域 --- */
+        .avatar-section {
+            flex: 6; 
+            position: relative;
+            background: radial-gradient(circle at 50% 40%, #1a1a1a 0%, #000000 80%);
+            overflow: hidden;
+        }
+
+        .overlay-title {
+            position: absolute;
+            top: 30px;
+            left: 40px;
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            z-index: 10;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+            border-left: 5px solid #e93ae1;
+            padding-left: 15px;
+        }
+
+        #avatar-canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute; 
+            top: 0; 
+            left: 0;
+            z-index: 1; 
+        }
+
+        /* --- 4. 右側：互動區域 --- */
+        .chat-section {
+            flex: 4;
+            display: flex;
+            flex-direction: column;
+            background-color: #0a0a0a;
+            border-left: 1px solid #222;
+            padding: 20px;
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        .user-camera-wrapper {
+            width: 100%;
+            height: 220px;
+            background-color: #111;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            position: relative;
+            border: 1px solid #333;
+            flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        #user-webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .camera-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #ddd;
+            pointer-events: none;
+        }
+
+        #dialogueDisplay {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding-right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            scroll-behavior: smooth; 
+        }
+
+        /* --- 5. 對話泡泡樣式 --- */
+        .message {
+            display: flex;
+            flex-direction: column;
+            max-width: 90%;
+            margin-bottom: 5px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.家長, .message.parent { align-self: flex-start; }
+        .message.家長 .message-content {
+            background-color: #2d2d2d;
+            color: #e0e0e0;
+            border-radius: 12px 12px 12px 0;
+            padding: 12px 16px;
+            line-height: 1.5;
+        }
+        .message.家長 .message-header {
+            text-align: left;
+            margin-bottom: 4px;
+            font-size: 0.85em;
+            color: #888;
+        }
+
+        .message.老師, .message.teacher { align-self: flex-end; }
+        .message.老師 .message-content {
+            background-color: #e93ae1;
+            color: white;
+            border-radius: 12px 12px 0 12px;
+            padding: 12px 16px;
+            line-height: 1.5;
+            box-shadow: 0 2px 8px rgba(233, 58, 225, 0.3);
+        }
+        .message.老師 .message-header {
+            text-align: right;
+            margin-bottom: 4px;
+            font-size: 0.85em;
+            color: #bbb;
+        }
+
+        .message-time {
+            font-size: 0.75em;
+            color: #555;
+            margin-top: 4px;
+            padding: 0 2px;
+        }
+        .message.老師 .message-time { text-align: right; }
+        .message.家長 .message-time { text-align: left; }
+
+        #dialogueDisplay::-webkit-scrollbar { width: 6px; }
+        #dialogueDisplay::-webkit-scrollbar-track { background: #111; }
+        #dialogueDisplay::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+        #dialogueDisplay::-webkit-scrollbar-thumb:hover { background: #555; }
+
+    </style>
+</head>
+<body>
+
+    <div class="interaction-container">
+        <div class="avatar-section">
+            <div class="overlay-title">練習進行中</div>
+            <div id="avatar-canvas-container"></div>
+        </div>
+
+        <div class="chat-section">
+            <div class="user-camera-wrapper">
+                <video id="user-webcam" autoplay playsinline muted></video>
+                <div class="camera-label">使用者鏡頭</div>
+            </div>
+
+            <div id="dialogueDisplay">
+                <div class="message 家長">
+                    <div class="message-header">👤 家長</div>
+                    <div class="message-content">老師您好，系統已就緒。請確認 test.wav 是否已放在資料夾中。</div>
+                    <div class="message-time">10:00</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="test-audio-btn" style="padding: 12px 20px; background: #e93ae1; color: white; border: none; cursor: pointer; border-radius: 8px; font-weight: bold; transition: 0.2s;">
+                    ▶️ 播放 test.wav 並動嘴巴
+                </button>
+            </div>
+            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                * 提示：按 F12 打開 Console 可測試表情控制，例如輸入 window.setEmotion('smile', 1)
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // 1. 初始化 Webcam
+        async function initWebcam() {
+            try {
+                const video = document.getElementById('user-webcam');
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+            } catch (err) {
+                console.warn("無法存取攝影機", err);
+            }
+        }
+        initWebcam();
+
+        // 2. Three.js 場景設定
+        const container = document.getElementById('avatar-canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = null; 
+
+        // 相機設定 (特寫上半身)
+        const camera = new THREE.PerspectiveCamera(25, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(0, 0.1, 1.5); 
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        container.appendChild(renderer.domElement);
+
+        // 燈光設定
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(-1, 2, 3);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+        const fillLight = new THREE.DirectionalLight(0xffaaee, 0.5);
+        fillLight.position.set(1, 0, 2);
+        scene.add(fillLight);
+        const rimLight = new THREE.SpotLight(0x4455ff, 3);
+        rimLight.position.set(0, 2, -2);
+        rimLight.lookAt(0, 1.5, 0);
+        scene.add(rimLight);
+
+        // 3. 載入模型與動畫邏輯
+        const loader = new GLTFLoader();
+        let headMesh;
+        let teethMesh; 
+        
+        // 使用 Ready Player Me 官方模型 (已包含 ARKit 表情)
+        const MODEL_URL = 'https://models.readyplayer.me/6970de41655a82b6fadcbd87.glb?morphTargets=ARKit,Oculus%20Visemes';
+
+        loader.load(MODEL_URL, (gltf) => {
+            const model = gltf.scene;
+            model.position.y = -1.65; // 調整位置
+            scene.add(model);
+
+            // 尋找頭部 Mesh
+            model.traverse((child) => {
+                if (child.isMesh && child.morphTargetDictionary) {
+                    if (child.morphTargetDictionary['jawOpen'] !== undefined) {
+                        headMesh = child;
+                    }
+                    if (child.name.includes('Teeth')) {
+                         teethMesh = child;
+                    }
+                }
+            });
+            console.log("Avatar 載入完成");
+            
+            // 模型載入完成後，啟動眨眼
+            startBlinking();
+
+        }, undefined, (error) => {
+            console.error('模型載入失敗:', error);
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        // 4. [新功能] 自動眨眼邏輯
+        function startBlinking() {
+            const blink = () => {
+                if (headMesh && headMesh.morphTargetDictionary) {
+                    const leftEyeIndex = headMesh.morphTargetDictionary['eyeBlinkLeft'];
+                    const rightEyeIndex = headMesh.morphTargetDictionary['eyeBlinkRight'];
+
+                    if (leftEyeIndex !== undefined && rightEyeIndex !== undefined) {
+                        // 閉眼
+                        headMesh.morphTargetInfluences[leftEyeIndex] = 1;
+                        headMesh.morphTargetInfluences[rightEyeIndex] = 1;
+                        // 0.15秒後張開
+                        setTimeout(() => {
+                            headMesh.morphTargetInfluences[leftEyeIndex] = 0;
+                            headMesh.morphTargetInfluences[rightEyeIndex] = 0;
+                        }, 150);
+                    }
+                }
+                // 隨機 2~5 秒後再次眨眼
+                setTimeout(blink, Math.random() * 3000 + 2000);
+            };
+            setTimeout(blink, 2000);
+        }
+
+        // 5. [新功能] 表情控制工具 (Global)
+        window.setEmotion = function(emotionName, value) {
+            if (!headMesh) return console.warn("Avatar 尚未載入完成");
+
+            // 表情對照表
+            const map = {
+                'smile': 'mouthSmile',
+                'sad': 'mouthFrownLeft',
+                'angry': 'browDownLeft',
+                'open': 'jawOpen'
+            };
+            const key = map[emotionName] || emotionName;
+
+            const apply = (mesh, targetKey, val) => {
+                if(mesh && mesh.morphTargetDictionary && mesh.morphTargetDictionary[targetKey] !== undefined) {
+                    const idx = mesh.morphTargetDictionary[targetKey];
+                    mesh.morphTargetInfluences[idx] = val;
+                }
+            };
+
+            // 處理微笑 (左右對稱)
+            if (key === 'mouthSmile') {
+                apply(headMesh, 'mouthSmileLeft', value);
+                apply(headMesh, 'mouthSmileRight', value);
+            } else {
+                apply(headMesh, key, value);
+            }
+            console.log(`設定表情: ${key} = ${value}`);
+        };
+
+        // 6. Audio Sync 核心邏輯
+        let audioContext, analyser, dataArray;
+        let currentVolume = 0;
+        let isSpeaking = false;
+
+        window.syncAvatarWithAudio = function(audioElement) {
+            if (!audioElement) return;
+
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 64; 
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+            }
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            if (!audioElement._isConnected) {
+                try {
+                    const source = audioContext.createMediaElementSource(audioElement);
+                    source.connect(analyser);
+                    analyser.connect(audioContext.destination);
+                    audioElement._isConnected = true;
+                } catch (e) {
+                    console.warn("Audio 連接重複忽略");
+                }
+            }
+
+            audioElement.onplay = () => { isSpeaking = true; };
+            audioElement.onpause = () => { isSpeaking = false; currentVolume = 0; };
+            audioElement.onended = () => { isSpeaking = false; currentVolume = 0; };
+        };
+
+        // 7. Render Loop (動畫迴圈)
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 音量偵測
+            if (isSpeaking && analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                let average = sum / dataArray.length;
+                let targetVolume = Math.min(1, (average / 25)); // 除以25讓嘴巴動大一點
+                currentVolume = THREE.MathUtils.lerp(currentVolume, targetVolume, 0.3);
+            } else {
+                currentVolume = THREE.MathUtils.lerp(currentVolume, 0, 0.2);
+            }
+
+            // 更新嘴巴 (jawOpen)
+            if (headMesh && headMesh.morphTargetDictionary) {
+                const jawIndex = headMesh.morphTargetDictionary['jawOpen'];
+                if (jawIndex !== undefined) headMesh.morphTargetInfluences[jawIndex] = currentVolume;
+            }
+            if (teethMesh && teethMesh.morphTargetDictionary) {
+                const jawIndex = teethMesh.morphTargetDictionary['jawOpen'];
+                if (jawIndex !== undefined) teethMesh.morphTargetInfluences[jawIndex] = currentVolume;
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // ==========================================
+        // 8. [整合] 按鈕功能：播放 test.wav
+        // ==========================================
+        document.getElementById('test-audio-btn').addEventListener('click', () => {
+            console.log("嘗試播放 test.wav...");
+            
+            // 讀取同目錄下的 test.wav
+            const audio = new Audio('test.wav');
+            
+            // 關鍵：允許跨域，雖然是本地檔案，但設了比較保險
+            audio.crossOrigin = "anonymous";
+            
+            // 連接嘴巴
+            if (window.syncAvatarWithAudio) {
+                window.syncAvatarWithAudio(audio);
+            }
+
+            // 播放
+            audio.play().then(() => {
+                console.log("正在播放音訊...");
+            }).catch(e => {
+                console.error("播放失敗:", e);
+                alert("播放失敗！請確認：\n1. 資料夾內是否有 test.wav\n2. 是否使用 Live Server 開啟網頁 (不要直接點開 html 檔)");
+            });
+        });
+
+    </script>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatar 整合系統</title>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            font-family: 'Microsoft JhengHei', 'Segoe UI', sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .avatar-section {
+            flex: 7;
+            position: relative;
+            background: radial-gradient(circle at 50% 40%, #1a1a1a 0%, #000000 80%);
+            overflow: hidden;
+        }
+
+        .title {
+            position: absolute;
+            top: 30px;
+            left: 40px;
+            font-size: 32px;
+            font-weight: bold;
+            z-index: 10;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+            border-left: 5px solid #00d4ff;
+            padding-left: 15px;
+        }
+
+        #avatar-canvas {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .status-display {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            right: 30px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #00d4ff;
+            z-index: 10;
+        }
+
+        .status-text {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: #00d4ff;
+        }
+
+        .control-panel {
+            flex: 3;
+            display: flex;
+            flex-direction: column;
+            background-color: #0a0a0a;
+            border-left: 1px solid #222;
+            padding: 25px;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 20px 0 15px 0;
+            color: #00d4ff;
+            border-bottom: 2px solid #00d4ff;
+            padding-bottom: 8px;
+        }
+
+        .mode-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 12px;
+            background: #1a1a1a;
+            border: 2px solid #333;
+            color: #888;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.3s;
+            font-weight: bold;
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            color: #000;
+            border-color: #00d4ff;
+        }
+
+        .mode-content {
+            display: none;
+        }
+
+        .mode-content.active {
+            display: block;
+        }
+
+        button {
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            color: #000;
+            border: none;
+            cursor: pointer;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: 0.3s;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 212, 255, 0.4);
+        }
+
+        button:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        button.stop-btn {
+            background: linear-gradient(135deg, #ff4444, #cc0000);
+            color: white;
+        }
+
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #fff;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .file-input {
+            width: 100%;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 2px dashed #00d4ff;
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            margin-bottom: 10px;
+        }
+
+        .info-box {
+            background: #1a1a1a;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 3px solid #00d4ff;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 15px;
+        }
+
+        .example-json {
+            background: #0a0a0a;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #0f0;
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="avatar-section">
+            <div class="title">Avatar 整合系統</div>
+            <div id="avatar-canvas"></div>
+            
+            <div class="status-display">
+                <div class="status-text" id="statusText">請選擇模式</div>
+                <div style="font-size: 14px; color: #888; margin-top: 5px;" id="modeInfo">
+                    API 模式：使用後端提供的精確 lipsync 數據<br>
+                    手動模式：使用音量自動同步（簡單快速）
+                </div>
+            </div>
+        </div>
+
+        <div class="control-panel">
+            <div class="section-title">📡 選擇模式</div>
+            
+            <div class="mode-selector">
+                <button class="mode-btn" id="apiModeBtn">API 模式</button>
+                <button class="mode-btn active" id="manualModeBtn">手動模式</button>
+            </div>
+
+            <!-- API 模式 -->
+            <div class="mode-content" id="apiMode">
+                <div class="info-box">
+                    💡 此模式使用後端 API 提供的 lipsync 數據，可獲得最精確的嘴型同步
+                </div>
+
+                <label style="display: block; margin-bottom: 5px; color: #aaa;">後端 API URL:</label>
+                <input type="text" id="apiUrl" placeholder="http://localhost:3000/chat" value="http://localhost:3000/chat" />
+
+                <label style="display: block; margin-bottom: 5px; color: #aaa;">訊息內容:</label>
+                <textarea id="apiMessage" placeholder='輸入要說的話，例如："你好，很高興見到你"'>你好，很高興見到你</textarea>
+
+                <button id="apiSendBtn">🚀 發送到 API</button>
+                <button class="stop-btn" id="apiStopBtn" disabled>⏹️ 停止</button>
+
+                <div class="info-box" style="margin-top: 15px;">
+                    <strong>預期 API 回應格式：</strong>
+                    <div class="example-json">{
+  "messages": [{
+    "audio": "base64_audio_data",
+    "lipsync": {
+      "mouthCues": [
+        {"start": 0.0, "end": 0.3, "value": "A"},
+        {"start": 0.3, "end": 0.6, "value": "D"}
+      ]
+    },
+    "facialExpression": "smile",
+    "animation": "Idle"
+  }]
+}</div>
+                </div>
+            </div>
+
+            <!-- 手動模式 -->
+            <div class="mode-content active" id="manualMode">
+                <div class="info-box">
+                    💡 此模式使用音量自動控制嘴型，簡單快速，不需要 API
+                </div>
+
+                <label style="display: block; margin-bottom: 5px; color: #aaa;">選擇音檔:</label>
+                <input type="file" class="file-input" id="audioFile" accept=".wav,.mp3" />
+
+                <label style="display: block; margin-bottom: 5px; color: #aaa;">表情:</label>
+                <select id="manualEmotion" style="width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #333; color: #fff; border-radius: 6px; margin-bottom: 10px;">
+                    <option value="default">Default</option>
+                    <option value="smile" selected>Smile</option>
+                    <option value="sad">Sad</option>
+                    <option value="surprised">Surprised</option>
+                    <option value="angry">Angry</option>
+                    <option value="crazy">Crazy</option>
+                </select>
+
+                <button id="manualPlayBtn" disabled>▶️ 播放</button>
+                <button class="stop-btn" id="manualStopBtn" disabled>⏹️ 停止</button>
+            </div>
+
+            <div class="section-title">ℹ️ 說明</div>
+            <div class="info-box">
+                <strong>API 模式</strong>：適合使用 Azure Speech Service、ElevenLabs 等提供 viseme 數據的服務<br><br>
+                <strong>手動模式</strong>：適合快速 Demo，不需要後端，直接上傳音檔即可
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // ==========================================
+        // 表情定義（對應 React 範例）
+        // ==========================================
+        const facialExpressions = {
+            default: {},
+            smile: {
+                browInnerUp: 0.17,
+                eyeSquintLeft: 0.4,
+                eyeSquintRight: 0.44,
+                noseSneerLeft: 0.17,
+                noseSneerRight: 0.14,
+                mouthPressLeft: 0.61,
+                mouthPressRight: 0.41,
+            },
+            sad: {
+                mouthFrownLeft: 1,
+                mouthFrownRight: 1,
+                mouthShrugLower: 0.78,
+                browInnerUp: 0.45,
+                eyeSquintLeft: 0.72,
+                eyeSquintRight: 0.75,
+            },
+            surprised: {
+                eyeWideLeft: 0.5,
+                eyeWideRight: 0.5,
+                jawOpen: 0.35,
+                mouthFunnel: 1,
+                browInnerUp: 1,
+            },
+            angry: {
+                browDownLeft: 1,
+                browDownRight: 1,
+                eyeSquintLeft: 1,
+                eyeSquintRight: 1,
+                jawForward: 1,
+                mouthShrugLower: 1,
+            },
+            crazy: {
+                browInnerUp: 0.9,
+                jawForward: 1,
+                jawOpen: 0.96,
+                mouthSmileLeft: 0.56,
+                mouthSmileRight: 0.38,
+                tongueOut: 0.96,
+            }
+        };
+
+        // Viseme 對應（對應 React 範例的 corresponding）
+        const visemeMapping = {
+            A: "viseme_PP",
+            B: "viseme_kk",
+            C: "viseme_I",
+            D: "viseme_AA",
+            E: "viseme_O",
+            F: "viseme_U",
+            G: "viseme_FF",
+            H: "viseme_TH",
+            X: "viseme_PP",
+        };
+
+        // ==========================================
+        // Three.js 場景設定
+        // ==========================================
+        const container = document.getElementById('avatar-canvas');
+        const scene = new THREE.Scene();
+        scene.background = null;
+
+        const camera = new THREE.PerspectiveCamera(25, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(0, 0.1, 1.5);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(-1, 2, 3);
+        scene.add(dirLight);
+
+        // ==========================================
+        // 載入模型
+        // ==========================================
+        const loader = new GLTFLoader();
+        let avatarScene, headMesh, teethMesh;
+        
+        const MODEL_URL = 'https://models.readyplayer.me/6970de41655a82b6fadcbd87.glb?morphTargets=ARKit,Oculus%20Visemes';
+
+        loader.load(MODEL_URL, (gltf) => {
+            avatarScene = gltf.scene;
+            avatarScene.position.y = -1.65;
+            scene.add(avatarScene);
+
+            avatarScene.traverse((child) => {
+                if (child.isMesh && child.morphTargetDictionary) {
+                    if (child.morphTargetDictionary['jawOpen']) {
+                        headMesh = child;
+                    }
+                    if (child.name.includes('Teeth')) {
+                        teethMesh = child;
+                    }
+                }
+            });
+            
+            console.log("✅ Avatar 載入完成");
+            startBlinking();
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        // ==========================================
+        // 眨眼系統
+        // ==========================================
+        function startBlinking() {
+            const blink = () => {
+                lerpMorphTarget('eyeBlinkLeft', 1, 1);
+                lerpMorphTarget('eyeBlinkRight', 1, 1);
+                setTimeout(() => {
+                    lerpMorphTarget('eyeBlinkLeft', 0, 1);
+                    lerpMorphTarget('eyeBlinkRight', 0, 1);
+                }, 150);
+                setTimeout(blink, Math.random() * 3000 + 2000);
+            };
+            setTimeout(blink, 2000);
+        }
+
+        // ==========================================
+        // Morph Target 控制（對應 React 的 lerpMorphTarget）
+        // ==========================================
+        function lerpMorphTarget(target, value, speed = 0.1) {
+            if (!avatarScene) return;
+            
+            avatarScene.traverse((child) => {
+                if (child.isMesh && child.morphTargetDictionary) {
+                    const index = child.morphTargetDictionary[target];
+                    if (index !== undefined && child.morphTargetInfluences[index] !== undefined) {
+                        child.morphTargetInfluences[index] = THREE.MathUtils.lerp(
+                            child.morphTargetInfluences[index],
+                            value,
+                            speed
+                        );
+                    }
+                }
+            });
+        }
+
+        function setMorphTarget(target, value) {
+            if (!avatarScene) return;
+            
+            avatarScene.traverse((child) => {
+                if (child.isMesh && child.morphTargetDictionary) {
+                    const index = child.morphTargetDictionary[target];
+                    if (index !== undefined) {
+                        child.morphTargetInfluences[index] = value;
+                    }
+                }
+            });
+        }
+
+        // ==========================================
+        // 表情控制
+        // ==========================================
+        let currentExpression = {};
+
+        function applyFacialExpression(expressionName) {
+            // 清除舊表情
+            Object.keys(currentExpression).forEach(key => {
+                lerpMorphTarget(key, 0, 0.1);
+            });
+
+            // 套用新表情
+            const expression = facialExpressions[expressionName] || facialExpressions['default'];
+            currentExpression = expression;
+
+            Object.entries(expression).forEach(([key, value]) => {
+                lerpMorphTarget(key, value, 0.1);
+            });
+
+            console.log(`😊 表情: ${expressionName}`);
+        }
+
+        // ==========================================
+        // API 模式實作
+        // ==========================================
+        let currentAudio = null;
+        let currentLipsync = null;
+        let isPlaying = false;
+
+        async function sendToAPI() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const message = document.getElementById('apiMessage').value;
+
+            try {
+                document.getElementById('statusText').textContent = '⏳ 發送中...';
+                document.getElementById('apiSendBtn').disabled = true;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message }),
+                });
+
+                const data = await response.json();
+                const messageData = data.messages[0];
+
+                // 設定表情
+                applyFacialExpression(messageData.facialExpression || 'smile');
+
+                // 播放音訊
+                currentAudio = new Audio('data:audio/mp3;base64,' + messageData.audio);
+                currentLipsync = messageData.lipsync;
+                
+                currentAudio.onplay = () => {
+                    isPlaying = true;
+                    document.getElementById('statusText').textContent = '▶️ 播放中（API 模式）';
+                    document.getElementById('apiStopBtn').disabled = false;
+                };
+
+                currentAudio.onended = () => {
+                    stopPlayback();
+                };
+
+                currentAudio.play();
+
+            } catch (error) {
+                console.error('API 錯誤:', error);
+                alert('API 呼叫失敗：' + error.message);
+                document.getElementById('statusText').textContent = '❌ API 錯誤';
+                document.getElementById('apiSendBtn').disabled = false;
+            }
+        }
+
+        // ==========================================
+        // 手動模式實作
+        // ==========================================
+        let audioContext, analyser, dataArray;
+        let manualAudio = null;
+
+        function setupAudioAnalyser(audioElement) {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+            }
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            if (!audioElement._isConnected) {
+                try {
+                    const source = audioContext.createMediaElementSource(audioElement);
+                    source.connect(analyser);
+                    analyser.connect(audioContext.destination);
+                    audioElement._isConnected = true;
+                } catch (e) {
+                    console.warn("Audio 連接重複");
+                }
+            }
+        }
+
+        function playManualMode() {
+            const file = document.getElementById('audioFile').files[0];
+            if (!file) {
+                alert('請先選擇音檔');
+                return;
+            }
+
+            const emotion = document.getElementById('manualEmotion').value;
+            applyFacialExpression(emotion);
+
+            const audioURL = URL.createObjectURL(file);
+            manualAudio = new Audio(audioURL);
+            setupAudioAnalyser(manualAudio);
+
+            manualAudio.onplay = () => {
+                isPlaying = true;
+                document.getElementById('statusText').textContent = '▶️ 播放中（手動模式）';
+                document.getElementById('manualPlayBtn').disabled = true;
+                document.getElementById('manualStopBtn').disabled = false;
+            };
+
+            manualAudio.onended = () => {
+                stopPlayback();
+            };
+
+            manualAudio.play().catch(e => {
+                console.error('播放失敗:', e);
+                alert('播放失敗！');
+            });
+        }
+
+        // ==========================================
+        // 停止播放
+        // ==========================================
+        function stopPlayback() {
+            isPlaying = false;
+
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            if (manualAudio) {
+                manualAudio.pause();
+                manualAudio = null;
+            }
+
+            currentLipsync = null;
+            applyFacialExpression('default');
+
+            document.getElementById('statusText').textContent = '⏹️ 已停止';
+            document.getElementById('apiSendBtn').disabled = false;
+            document.getElementById('apiStopBtn').disabled = true;
+            document.getElementById('manualPlayBtn').disabled = false;
+            document.getElementById('manualStopBtn').disabled = true;
+        }
+
+        // ==========================================
+        // Render Loop
+        // ==========================================
+        let currentVolume = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isPlaying) {
+                if (currentLipsync && currentAudio) {
+                    // API 模式：使用精確的 lipsync 數據
+                    const currentTime = currentAudio.currentTime;
+                    const appliedTargets = [];
+
+                    for (let i = 0; i < currentLipsync.mouthCues.length; i++) {
+                        const cue = currentLipsync.mouthCues[i];
+                        if (currentTime >= cue.start && currentTime <= cue.end) {
+                            const viseme = visemeMapping[cue.value];
+                            if (viseme) {
+                                lerpMorphTarget(viseme, 1, 0.2);
+                                appliedTargets.push(viseme);
+                            }
+                            break;
+                        }
+                    }
+
+                    // 清除未使用的 viseme
+                    Object.values(visemeMapping).forEach(viseme => {
+                        if (!appliedTargets.includes(viseme)) {
+                            lerpMorphTarget(viseme, 0, 0.1);
+                        }
+                    });
+
+                } else if (manualAudio && analyser) {
+                    // 手動模式：使用音量控制
+                    analyser.getByteFrequencyData(dataArray);
+                    let sum = 0;
+                    for (let i = 0; i < dataArray.length; i++) {
+                        sum += dataArray[i];
+                    }
+                    let average = sum / dataArray.length;
+                    let targetVolume = Math.min(1, average / 30);
+                    currentVolume = THREE.MathUtils.lerp(currentVolume, targetVolume, 0.3);
+
+                    setMorphTarget('jawOpen', currentVolume);
+                }
+            } else {
+                currentVolume = THREE.MathUtils.lerp(currentVolume, 0, 0.2);
+                setMorphTarget('jawOpen', 0);
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // ==========================================
+        // UI 事件綁定
+        // ==========================================
+        document.getElementById('apiModeBtn').addEventListener('click', () => {
+            document.getElementById('apiModeBtn').classList.add('active');
+            document.getElementById('manualModeBtn').classList.remove('active');
+            document.getElementById('apiMode').classList.add('active');
+            document.getElementById('manualMode').classList.remove('active');
+            document.getElementById('modeInfo').textContent = 'API 模式：使用後端提供的精確 lipsync 數據';
+        });
+
+        document.getElementById('manualModeBtn').addEventListener('click', () => {
+            document.getElementById('manualModeBtn').classList.add('active');
+            document.getElementById('apiModeBtn').classList.remove('active');
+            document.getElementById('manualMode').classList.add('active');
+            document.getElementById('apiMode').classList.remove('active');
+            document.getElementById('modeInfo').textContent = '手動模式：使用音量自動同步（簡單快速）';
+        });
+
+        document.getElementById('apiSendBtn').addEventListener('click', sendToAPI);
+        document.getElementById('apiStopBtn').addEventListener('click', stopPlayback);
+        document.getElementById('manualPlayBtn').addEventListener('click', playManualMode);
+        document.getElementById('manualStopBtn').addEventListener('click', stopPlayback);
+
+        document.getElementById('audioFile').addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                document.getElementById('manualPlayBtn').disabled = false;
+            }
+        });
+
+        console.log("🎬 系統初始化完成");
+    </script>
+</body>
+</html>

@@ -1,0 +1,1169 @@
+/* 基本樣式 */
+body {
+    font-family: Arial, sans-serif;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #f5f5f5;
+}
+
+h1 {
+    text-align: center;
+    color: #333;
+    margin-bottom: 30px;
+}
+
+/* 容器佈局 */
+.container {
+    display: flex;
+    gap: 15px;
+    width: 100%;
+    margin: 0;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.main-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.main-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* 面板樣式 */
+.panel {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 顯示區域樣式 */
+#scenarioDisplay, #dialogueDisplay {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* 分析顯示區域樣式 */
+#analysisDisplay {
+    background-color: #f8f9fa;
+    border-left: 4px solid #e93ae1;
+    padding: 20px;
+    margin-top: 20px;
+    grid-column: 1 / -1;
+}
+
+#analysisDisplay h3 {
+    color: #e93ae1;
+    margin-top: 0;
+    font-size: 1.2em;
+    margin-bottom: 1em;
+}
+
+#analysisContent {
+    font-size: 1.2em;
+    line-height: 1.6;
+    white-space: normal;
+    word-wrap: break-word;
+}
+
+#analysisContent pre {
+    white-space: pre-wrap;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    font-size: inherit;
+}
+
+/* 分析項目樣式 */
+.analysis-item {
+    margin-bottom: 1.2em;
+    padding-left: 1em;
+}
+
+.analysis-item:last-child {
+    margin-bottom: 0;
+}
+
+.final-suggestion {
+    margin-top: 1.5em;
+    padding-top: 1.5em;
+    border-top: 1px solid #e0e0e0;
+}
+
+/* 對話條目樣式 */
+.entry {
+    margin-bottom: 15px;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+.family {
+    background-color: #e3f2fd;
+    color: #1565c0;
+}
+
+.teacher {
+    background-color: #e8f5e9;
+    color: #e93ae1;
+}
+
+/* 表單元素樣式 */
+select, button {
+    padding: 10px 15px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    margin-right: 10px;
+}
+
+button {
+    background-color: #e93ae1;
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #e93ae1;
+}
+
+button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+.select-btn {
+    color: #e93ae1; /* 字體顏色 */
+    border: none; /* 移除邊框 */
+    cursor: pointer; /* 鼠標移上去顯示按鈕手勢 */
+    transition: background-color 0.3s; /* 添加過渡效果 */
+    font-size: 14px; /* 縮小字體 */
+    border-radius: 1px; /* 添加圓角 */
+    margin: 0 5px; /* 按鈕之間的間距 */
+}
+
+.select-btn:hover {
+    background-color: #e93ae1; /* 鼠標懸停時變深綠色 */
+    color: #ffffff;
+}
+
+.small-btn {
+    color: #f4431c; /* 字體顏色 */
+    border: none; /* 移除邊框 */
+    cursor: pointer; /* 鼠標移上去顯示按鈕手勢 */
+    transition: background-color 0.3s; /* 添加過渡效果 */
+    font-size: 14px; /* 縮小字體 */
+    border-radius: 1px; /* 添加圓角 */
+    margin: 0 5px; /* 按鈕之間的間距 */
+}
+
+.small-btn:hover {
+    background-color: #f86d4d; /* 鼠標懸停時變深綠色 */
+    color: #ffffff;
+}
+
+#practiceList {
+    margin: 0; /* 移除外邊距 */
+    padding: 0; /* 移除內邊距 */
+    list-style: none; /* 移除預設的列表符號 */
+    width: 100%; /* 確保寬度佔滿父容器 */
+}
+
+#practiceList li {
+    margin: 10px 0; /* 上下間距 */
+    padding: 5px; /* 內邊距 */
+    border-radius: 6px; /* 圓角 */
+    list-style: none; /* 移除預設的列表樣式 */
+}
+
+.technique-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.technique-options button {
+    padding: 10px;
+    background-color: #e93ae1;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.3s;
+}
+
+.technique-options button:hover {
+    background-color: #e93ae1;
+}
+
+#techniqueIntro {
+    background-color: #fefefe;
+    border-left: 4px solid #e93ae1;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 錄音控制樣式 */
+.record-controls {
+    display: flex;
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.record-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.status {
+    padding: 10px;
+    color: #666;
+    text-align: center;
+}
+
+/* 音訊播放區域樣式 */
+.audio-playback {
+    background-color: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+#recordingsList {
+    list-style: none;
+    padding: 0;
+}
+
+#recordingsList li {
+    background-color: #f8f9fa;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    border: 1px solid #eee;
+}
+
+audio {
+    width: 100%;
+    margin: 10px 0;
+}
+
+.recording-time {
+    color: #666;
+    font-size: 0.9em;
+    margin-bottom: 5px;
+}
+
+.recording-text {
+    margin: 10px 0;
+    padding: 10px;
+    background-color: white;
+    border-radius: 4px;
+}
+
+/* 對話顯示樣式 */
+#dialogueDisplay {
+    background-color: #f5f5f5;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+/* 訊息樣式 */
+.message {
+    margin: 10px 0;
+    max-width: 80%;
+    padding: 12px 15px;
+    border-radius: 15px;
+    position: relative;
+    word-wrap: break-word;
+    animation: fadeIn 0.3s ease-out;
+    font-size: 24px;
+    line-height: 1.6;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.message.parent, .message.家長 {
+    background-color: #e3f2fd;
+    color: #1565c0;
+    margin-right: auto;
+    margin-left: 0;
+    border-bottom-left-radius: 5px;
+}
+
+.message.teacher, .message.老師 {
+    background-color: #e8f5e9;
+    color: #000000;
+    margin-left: auto;
+    margin-right: 0;
+    border-bottom-right-radius: 5px;
+}
+
+.message.suggestion {
+    background-color: #fff3e0;
+    border-left: 3px solid #ff9800;
+    max-width: 100%;
+    width: 95%;
+    margin: 20px auto;
+    border-radius: 8px;
+}
+
+.message-content {
+    line-height: 1.4;
+    margin: 8px 0;
+}
+
+/* 訊息時間和標題對齊 */
+.message.parent .message-time,
+.message.parent .message-header {
+    text-align: left;
+}
+
+.message.teacher .message-time,
+.message.teacher .message-header {
+    text-align: right;
+}
+
+/* 預覽區域樣式 */
+.preview-area {
+    background-color: rgba(197, 99, 172, 0.5);
+    padding: 10px;
+    border-radius: 8px;
+    margin: 10px 0;
+    display: none;
+}
+
+.preview-area.active {
+    display: block;
+}
+
+#practiceSidebar {
+    width: 20%; /* 調整寬度為 20% */
+    max-width: 250px; /* 設定最大寬度 */
+    min-width: 200px; /* 設定最小寬度，避免過窄 */
+    overflow-y: auto; /* 如果內容超出高度，可以垂直滾動 */
+    border-right: 1px solid #ddd; /* 增加分隔線讓版面更有結構 */
+    padding: 10px; /* 增加內邊距讓內容更美觀 */
+    box-sizing: border-box; /* 確保 padding 不影響元素的實際寬度 */
+}
+
+/* 錄音列表樣式 */
+.recordings-sidebar {
+    width: 20%; /* 右側錄音歷史區域的寬度與左側一致 */
+    max-width: 250px;
+    min-width: 150px;
+    overflow-y: auto;
+    padding: 10px;
+    border-left: 1px solid #ddd; /* 增加分隔線 */
+    box-sizing: border-box;
+}
+
+.recordings-title {
+    font-size: 1.2em;
+    font-weight: bold;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #eee;
+}
+
+#recordingsList {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.recording-item {
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.recording-time {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.recording-text {
+    background-color: white;
+    padding: 10px;
+    border-radius: 4px;
+    margin: 8px 0;
+}
+
+.recording-audio audio {
+    width: 100%;
+    margin-top: 8px;
+}
+
+.recording-text p {
+    margin: 5px 0;
+    line-height: 1.4;
+    color: #333;
+}
+
+.no-recordings {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+    font-style: italic;
+}
+
+.error-message {
+    color: #dc3545;
+    text-align: center;
+    padding: 20px;
+}
+
+.spinner-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.8);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #f3f3f3;
+    border-top: 5px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.feedback-section {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    margin-top: 20px;
+}
+
+.feedback-section h3 {
+    color: #e93ae1;
+    margin-bottom: 15px;
+    font-size: 1.5em;
+    text-align: center;
+}
+
+.feedback-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+    border: 1px solid #ddd;
+    padding: 10px;
+    border-radius: 8px;
+    background-color: white;
+}
+
+.feedback-item {
+    padding: 10px;
+    margin-bottom: 10px;
+    background-color: #f5f5f5;
+    border-radius: 5px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.feedback-item .feedback-author {
+    font-weight: bold;
+    color: #1565c0;
+}
+
+.feedback-input {
+    width: 100%;
+    height: 80px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    padding: 10px;
+    margin-bottom: 10px;
+    font-size: 1em;
+}
+
+.feedback-btn {
+    width: 100%;
+    padding: 10px;
+    background-color: #e93ae1;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 1em;
+    cursor: pointer;
+}
+
+.feedback-btn:hover {
+    background-color: #e93ae1;
+}
+
+.no-feedback {
+    text-align: center;
+    color: #757575;
+    font-style: italic;
+}
+
+.practice-item {
+    cursor: pointer; /* 鼠標顯示手指圖標 */
+    border-radius: 5px;
+    transition: background-color 0.3s;
+}
+
+.practice-item {
+    margin: 0; /* 移除外邊距 */
+    padding: 10px; /* 添加適當的內邊距 */
+    width: 100%; /* 讓每個項目寬度佔滿父容器 */
+    box-sizing: border-box; /* 確保內邊距不影響寬度計算 */
+    text-align: left; /* 確保文本靠左對齊 */
+}
+
+.practice-item:hover {
+    background-color: #e93ae1; /* 鼠標懸停時背景色變化 */
+    color: white;
+}
+
+.practice-item.selected {
+    background-color: #e93ae1; /* 點擊後選中的背景色 */
+    color: white;
+    font-weight: bold; /* 高亮選中項 */
+}
+
+.site-banner {
+    transition: transform 0.3s ease-in-out;
+    will-change: transform;
+}
+
+.login-image {
+    width: 250px; /* 設定圖片寬度 */
+    height: auto; /* 自動調整高度以保持比例 */
+    margin: 0 auto; /* 如果需要居中，添加這行 */
+    display: block; /* 保證圖片是塊級元素，配合 margin 居中 */
+}
+
+/* 練習搜尋與篩選容器樣式 */
+.practice-search-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.practice-search-input {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+}
+
+.practice-search-input:focus {
+    outline: none;
+    border-color: #e93ae1;
+    box-shadow: 0 0 3px rgba(233, 58, 225, 0.3);
+}
+
+.practice-filter {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    background-color: white;
+    cursor: pointer;
+}
+
+.practice-filter:focus {
+    outline: none;
+    border-color: #e93ae1;
+}
+
+/* 練習項目樣式改進 */
+.practice-item {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    margin: 8px 0;
+    border-radius: 8px;
+    background-color: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+    cursor: pointer;
+    position: relative;
+}
+
+.practice-item:hover {
+    background-color: #f0e6f0;
+    transform: translateY(-2px);
+}
+
+.practice-item.selected {
+    background-color: #e93ae1;
+    color: white;
+}
+
+.practice-item-title {
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.practice-item-scenario {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.practice-item.selected .practice-item-scenario {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.practice-item-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.practice-item-badge.basic {
+    background-color: #4caf50;
+    color: white;
+}
+
+.practice-item-badge.challenge {
+    background-color: #ff5722;
+    color: white;
+}
+
+.small-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    background-color: transparent;
+    color: #f44336;
+    border: 1px solid #f44336;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.small-btn:hover {
+    background-color: #f44336;
+    color: white;
+}
+
+.practice-item.selected .small-btn {
+    border-color: white;
+    color: white;
+}
+
+.practice-item.selected .small-btn:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.no-practice {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+    font-style: italic;
+}
+
+/* 當沒有練習時的提示樣式 */
+.empty-practices-message {
+    text-align: center;
+    padding: 30px 20px;
+    background-color: #f9f9f9;
+    border-radius: 8px;
+    margin: 20px 0;
+    color: #666;
+}
+
+.empty-practices-message p {
+    margin-bottom: 15px;
+}
+
+.empty-practices-message .guide-step {
+    margin: 10px 0;
+    padding: 10px;
+    background-color: white;
+    border-radius: 5px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.guide-step-number {
+    display: inline-block;
+    width: 25px;
+    height: 25px;
+    line-height: 25px;
+    text-align: center;
+    background-color: #e93ae1;
+    color: white;
+    border-radius: 50%;
+    margin-right: 10px;
+}
+
+/* 重新練習按鈕容器 */
+.retry-button-container {
+    margin: 20px 0;
+    text-align: center;
+}
+
+/* 主要重新練習按鈕 */
+.retry-main-btn {
+    padding: 12px 24px;
+    background-color: #e93ae1;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.3s, transform 0.2s;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.retry-main-btn:hover {
+    background-color: #c81fb3;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.retry-main-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* 重新練習標記樣式 - 應用於有重新練習標識的練習項目 */
+.practice-item.retry {
+    border-left: 4px solid #e93ae1;
+}
+
+.retry-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+    background-color: #e93ae1;
+    color: white;
+    margin-left: 8px;
+}
+
+/* 錄音進度相關樣式 */
+.recording-progress-container {
+    margin: 15px 0;
+    background-color: #f5f5f5;
+    border-radius: 10px;
+    padding: 5px;
+    position: relative;
+    height: 30px;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.recording-progress-bar {
+    height: 100%;
+    background-color: #e93ae1;
+    border-radius: 7px;
+    transition: width 0.3s ease;
+    width: 0%;
+    position: absolute;
+    left: 0;
+    top: 0;
+}
+
+.recording-timer-display {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-weight: bold;
+    color: black;
+    z-index: 10;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+.recording-active {
+    animation: pulse 1.5s infinite;
+}
+
+.recording-limit-info {
+    margin-top: 10px;
+    font-size: 0.9em;
+    color: #666;
+    padding: 5px 10px;
+    background-color: #f8f8f8;
+    border-radius: 5px;
+    border-left: 3px solid #e93ae1;
+}
+
+.recording-limit-value {
+    font-weight: bold;
+    color: #e93ae1;
+}
+
+.recording-tip {
+    display: block;
+    font-style: italic;
+    font-size: 0.9em;
+    margin-top: 5px;
+}
+
+/* 錄音按鈕在錄音中的樣式 */
+#startRecordBtn.recording {
+    background-color: #f44336;
+    animation: pulse 1.5s infinite;
+}
+
+#recordStatus.recording {
+    color: #e93ae1;
+    font-weight: bold;
+}
+
+/* 響應式調整 */
+@media (max-width: 768px) {
+    .retry-main-btn {
+        padding: 10px 20px;
+        font-size: 14px;
+    }
+}
+
+/* 自適應樣式 */
+@media (max-width: 768px) {
+    .practice-search-container {
+        padding: 10px;
+    }
+    
+    .practice-item {
+        padding: 10px;
+    }
+    
+    .practice-item-badge {
+        top: 8px;
+        right: 8px;
+        padding: 2px 6px;
+        font-size: 10px;
+    }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.spinner-visible {
+    display: flex;
+}
+
+/* 響應式設計 */
+@media (max-width: 1200px) {
+    .container {
+        flex-direction: column;
+    }
+    
+    .recordings-sidebar {
+        width: 100%;
+        height: auto;
+        max-height: 400px;
+        position: static;
+    }
+    
+    .main-section {
+        max-width: 100%;
+    }
+}
+
+/* 更新容器佈局 */
+.container {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    box-sizing: border-box !important;
+}
+
+/* 更新主要內容區域 */
+.main-section {
+    flex: 1 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* 減少側邊欄寬度 */
+#practiceSidebar {
+    width: 15%; /* 減少寬度 */
+    max-width: 200px; /* 減少最大寬度 */
+    min-width: 150px; /* 減少最小寬度 */
+    overflow-y: auto;
+    border-right: 1px solid #ddd;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+/* 錄音列表側邊欄 */
+.recordings-sidebar {
+    width: 15%; /* 減少寬度與左側一致 */
+    max-width: 200px; /* 減少最大寬度 */
+    min-width: 150px; /* 減少最小寬度 */
+    overflow-y: auto;
+    padding: 10px;
+    border-left: 1px solid #ddd;
+    box-sizing: border-box;
+}
+
+/* 優化對話顯示區域 */
+#dialogueDisplay {
+    background-color: #f5f5f5;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    max-height: 500px;
+    overflow-y: auto;
+    width: 100%; /* 確保寬度充分利用 */
+}
+
+/* 增強響應式設計 */
+@media (max-width: 1200px) {
+    .container {
+        flex-direction: column;
+    }
+    
+    #practiceSidebar, .recordings-sidebar {
+        width: 100%;
+        max-width: 100%;
+        height: auto;
+        max-height: 300px;
+        position: static;
+    }
+    
+    .main-section {
+        max-width: 100%;
+        min-width: unset;
+    }
+}
+
+/* 中等屏幕適配 */
+@media (min-width: 1201px) and (max-width: 1400px) {
+    #practiceSidebar, .recordings-sidebar {
+        width: 12%;
+        min-width: 120px;
+    }
+    
+    .main-section {
+        max-width: 76%;
+    }
+}
+
+/* 針對面板內容的優化 */
+.panel {
+    width: 100%;
+    box-sizing: border-box;
+}
+/* 調整錄音列表容器的大小 */
+#recordingsList {
+    max-height: 250px; /* 根據實際需要調整高度 */
+    overflow-y: auto;
+    margin-bottom: 10px; /* 縮小底部間距 */
+}
+
+/* 讓學習紀錄直接跟在錄音歷史下方 */
+.recordings-sidebar .feedback-section {
+    margin-top: 10px; /* 減少上方間距 */
+    border-top: 1px solid #eee; /* 可選：添加分隔線 */
+    padding-top: 10px;
+}
+
+/* 調整錄音歷史標題底部間距 */
+.recordings-title {
+    margin-bottom: 10px; /* 減小間距 */
+}
+
+/* 調整容器最大寬度 */
+.container {
+    max-width: 95%; /* 將整體容器擴展到視窗寬度的95% */
+    width: 95%;
+    margin: 0 auto;
+}
+
+/* 調整左側欄寬度 */
+#practiceSidebar {
+    width: 20%; /* 從15%增加到20% */
+    max-width: 280px; /* 增加最大寬度 */
+    min-width: 200px; /* 增加最小寬度 */
+}
+
+/* 調整右側欄寬度 */
+.recordings-sidebar {
+    width: 20%; /* 從15%增加到20% */
+    max-width: 280px; /* 增加最大寬度 */
+    min-width: 200px; /* 增加最小寬度 */
+}
+
+/* 確保中間區域佔用相應空間 */
+.main-section {
+    flex: 1;
+    min-width: 600px; /* 保持不變 */
+    max-width: none; /* 移除最大寬度限制，讓它根據容器和其他元素自動調整 */
+}
+
+/* 對於特寬螢幕，限制中間區域的最大寬度 */
+@media (min-width: 1800px) {
+    .main-section {
+        max-width: 1200px; /* 在非常寬的螢幕上設置最大寬度 */
+        margin: 0 auto;
+    }
+}
+
+/* 強制覆蓋側邊欄寬度 */
+#practiceSidebar.recordings-sidebar,
+.recordings-sidebar {
+    width: 25% !important; /* 從15%增加到20% */
+    max-width: 300px !important; /* 增加最大寬度 */
+    min-width: 200px !important; /* 增加最小寬度 */
+    flex-basis: 20% !important; /* 確保flex佈局也使用相同寬度 */
+}
+
+/* 強制容器使用更大的寬度 */
+.container {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    box-sizing: border-box !important;
+}
+
+/* 確保中間區域適應 */
+.main-section {
+    flex: 1 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* 輸入方式選擇器樣式 */
+.input-method-selector {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+}
+
+.input-method-selector label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 4px;
+    transition: background-color 0.3s;
+}
+
+.input-method-selector label:hover {
+    background-color: #e9ecef;
+}
+
+.input-method-selector input[type="radio"] {
+    margin: 0;
+}
+
+/* 文字輸入控制區域樣式 */
+#textInputControls {
+    width: 100%;
+}
+
+#textInput {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    resize: vertical;
+    font-family: inherit;
+    font-size: 24px;
+    line-height: 1.6;
+    margin-bottom: 10px;
+}
+
+#textInput:focus {
+    outline: none;
+    border-color: #e93ae1;
+    box-shadow: 0 0 0 2px rgba(233, 58, 225, 0.1);
+}
+
+#submitTextBtn {
+    background-color: #e93ae1;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.3s;
+}
+
+#submitTextBtn:hover {
+    background-color: #d42acd;
+}
+
+#submitTextBtn:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+/* 語音輸入控制區域樣式 */
+#voiceInputControls {
+    width: 100%;
+}

@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>親師溝通非語言分析器 (CommAI 沉浸版)</title>
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <style>
+        body { 
+            font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; 
+            margin: 0; padding: 0; 
+            background-color: #000; /* 全黑背景，強調畫面 */
+            color: #fff; height: 100vh; overflow: hidden;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        
+        /* 標題與控制列 (懸浮在上方) */
+        .top-bar {
+            position: absolute; top: 20px; z-index: 100;
+            display: flex; gap: 20px; align-items: center;
+            background: rgba(0, 0, 0, 0.5); padding: 10px 30px; border-radius: 50px;
+            backdrop-filter: blur(5px);
+        }
+        h1 { margin: 0; font-size: 1.2rem; color: #fff; opacity: 0.9; }
+        
+        button {
+            padding: 8px 25px; border: none; border-radius: 50px;
+            font-size: 14px; font-weight: bold; cursor: pointer;
+            transition: all 0.3s;
+        }
+        #startBtn { background: #00b894; color: white; }
+        #stopBtn { background: #d63031; color: white; }
+        button:disabled { background: #555; cursor: not-allowed; opacity: 0.5; }
+        button:hover:not(:disabled) { transform: scale(1.05); }
+
+        /* 主視訊容器 */
+        .video-wrapper {
+            position: relative;
+            width: 90vw; height: 85vh; /* 盡量佔滿畫面 */
+            max-width: 1600px;
+            border-radius: 20px; overflow: hidden;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* 視訊與 Canvas */
+        video { display: none; } 
+        canvas { width: 100%; height: 100%; object-fit: contain; background: #111; }
+
+        /* === HUD 資訊疊加層 === */
+        .hud-panel {
+            position: absolute; padding: 15px 20px; border-radius: 12px;
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(8px);
+            color: white; font-size: 1rem; border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s; min-width: 160px;
+            display: flex; align-items: center; gap: 10px;
+        }
+        
+        /* 角落定位 */
+        .hud-tl { top: 20px; left: 20px; }  /* Top Left: Gaze */
+        .hud-tr { top: 20px; right: 20px; text-align: right; justify-content: flex-end;} /* Top Right: Smile */
+        .hud-bl { bottom: 20px; left: 20px; } /* Bottom Left: Pose */
+        .hud-br { bottom: 20px; right: 20px; text-align: right; justify-content: flex-end;} /* Bottom Right: Hand */
+
+        /* 狀態指示燈 */
+        .indicator {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: #ccc; box-shadow: 0 0 8px currentColor;
+        }
+        .status-good { color: #00b894; background: #00b894; }
+        .status-warn { color: #fdcb6e; background: #fdcb6e; }
+        .status-bad { color: #d63031; background: #d63031; }
+
+        .hud-label { font-size: 0.8em; color: #aaa; text-transform: uppercase; letter-spacing: 1px;}
+        .hud-value { font-size: 1.2em; font-weight: bold; margin-top: 2px; }
+        
+        .icon { font-size: 1.5em; }
+
+        /* 狀態訊息 */
+        #status {
+            position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.7); padding: 5px 15px; border-radius: 20px;
+            font-size: 0.9rem; color: #ccc; pointer-events: none;
+        }
+
+        /* 錄影指示燈 */
+        .rec-badge {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(255, 0, 0, 0.2); color: #ff5252;
+            padding: 5px 12px; border-radius: 4px; font-weight: bold; font-size: 0.8rem;
+            border: 1px solid rgba(255,0,0,0.3); display: none;
+        }
+        
+        /* 隱藏區塊 (保留結構但不顯示) */
+        .hidden-section { display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- 頂部控制列 -->
+    <div class="top-bar">
+        <h1>CommAI Analysis</h1>
+        <button id="startBtn">🚀 啟動</button>
+        <button id="stopBtn" disabled>⏹️ 停止</button>
+    </div>
+
+    <!-- 錄影狀態 -->
+    <div class="rec-badge" id="rec-indicator">● REC</div>
+
+    <!-- 主畫面容器 -->
+    <div class="video-wrapper">
+        <video id="input_video" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+
+        <!-- HUD: 左上 - 眼神 -->
+        <div class="hud-panel hud-tl" id="hud-gaze">
+            <div class="indicator status-warn" id="ind-gaze"></div>
+            <div>
+                <div class="hud-label">Eye Contact</div>
+                <div class="hud-value" id="val-gaze">Waiting</div>
+            </div>
+        </div>
+
+        <!-- HUD: 右上 - 表情 -->
+        <div class="hud-panel hud-tr" id="hud-smile">
+            <div>
+                <div class="hud-label">Expression</div>
+                <div class="hud-value" id="val-smile">--</div>
+            </div>
+            <span class="icon">😊</span>
+        </div>
+
+        <!-- HUD: 左下 - 姿態 -->
+        <div class="hud-panel hud-bl" id="hud-pose">
+            <span class="icon">🛡️</span>
+            <div>
+                <div class="hud-label">Posture</div>
+                <div class="hud-value" id="val-pose">--</div>
+            </div>
+        </div>
+
+        <!-- HUD: 右下 - 手勢 -->
+        <div class="hud-panel hud-br" id="hud-hand">
+            <div>
+                <div class="hud-label">Gesture</div>
+                <div class="hud-value" id="val-hand">None</div>
+            </div>
+            <span class="icon">✋</span>
+        </div>
+    </div>
+
+    <div id="status">系統初始化中...</div>
+
+    <!-- 隱藏的音訊與評分區塊 (邏輯保留運作，但畫面不顯示) -->
+    <div class="hidden-section">
+        <div id="val-speed">0.0</div>
+        <div id="val-tone">0.0</div>
+        <div id="val-vol">0</div>
+        <div id="score-total">0</div>
+    </div>
+
+<!-- Script: MediaPipe Tasks Vision (Module) -->
+<script type="module">
+    import {
+        GestureRecognizer,
+        FilesetResolver,
+        DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusDiv = document.getElementById('status');
+    const recIndicator = document.getElementById('rec-indicator');
+
+    // HUD Elements
+    const elGazeVal = document.getElementById('val-gaze');
+    const elGazeInd = document.getElementById('ind-gaze');
+    const elSmileVal = document.getElementById('val-smile');
+    const elPoseVal = document.getElementById('val-pose');
+    const elHandVal = document.getElementById('val-hand');
+    const panelGaze = document.getElementById('hud-gaze');
+    const panelPose = document.getElementById('hud-pose');
+
+    // Variables
+    const UPDATE_INTERVAL = 3.0; 
+    let isRunning = false;
+    let gestureRecognizer;
+    let holistic;
+    let camera;
+    let lastVideoTime = -1;
+    let lastGestureTime = 0;
+
+    // Audio
+    let audioContext, analyser, microphone, recognition;
+    let accumulatedChars = 0;
+    let pitchBuffer = [];
+
+    // === 初始化 ===
+    async function init() {
+        statusDiv.innerText = "⏳ 載入 AI 模型中...";
+        startBtn.disabled = true;
+
+        try {
+            // Gesture
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+            );
+            gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+                    delegate: "GPU"
+                },
+                runningMode: "VIDEO"
+            });
+
+            // Holistic
+            holistic = new Holistic({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`});
+            holistic.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            holistic.onResults(onHolisticResults);
+
+            statusDiv.innerText = "✅ 準備就緒";
+            startBtn.disabled = false;
+
+        } catch (e) {
+            statusDiv.innerText = "❌ Error: " + e.message;
+        }
+    }
+
+    // === 控制 ===
+    startBtn.addEventListener('click', async () => {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        isRunning = true;
+        statusDiv.style.display = 'none'; // 隱藏狀態文字
+        recIndicator.style.display = 'block';
+
+        camera = new Camera(videoElement, {
+            onFrame: async () => {
+                if (!isRunning) return;
+                await holistic.send({image: videoElement});
+                
+                let now = Date.now();
+                if (now - lastGestureTime > 150) { // 降低手勢偵測頻率以提升效能
+                    predictGesture();
+                    lastGestureTime = now;
+                }
+            },
+            width: 1280,
+            height: 720
+        });
+        await camera.start();
+        initAudio(); // 語音分析在背景跑，不顯示 UI
+    });
+
+    stopBtn.addEventListener('click', () => location.reload());
+
+    // === 手勢識別 ===
+    function predictGesture() {
+        if (!gestureRecognizer) return;
+        if (videoElement.currentTime !== lastVideoTime) {
+            lastVideoTime = videoElement.currentTime;
+            const results = gestureRecognizer.recognizeForVideo(videoElement, Date.now());
+
+            if (results.gestures.length > 0) {
+                const category = results.gestures[0][0];
+                const name = category.categoryName;
+                const score = category.score;
+                
+                if (score > 0.5 && name !== "None") {
+                    let display = name;
+                    if(name === "Thumb_Up") display = "Thumb Up 👍";
+                    if(name === "Victory") display = "Victory ✌️";
+                    if(name === "Open_Palm") display = "Open Palm ✋";
+                    if(name === "Closed_Fist") display = "Closed Fist ✊";
+                    if(name === "Pointing_Up") display = "Pointing ☝️";
+                    
+                    elHandVal.innerText = display;
+                    elHandVal.style.color = "#00b894"; // Green
+                } else {
+                    elHandVal.innerText = "None";
+                    elHandVal.style.color = "white";
+                }
+            } else {
+                elHandVal.innerText = "None";
+                elHandVal.style.color = "white";
+            }
+        }
+    }
+
+    // === 視覺分析 (Holistic) ===
+    function onHolisticResults(results) {
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+        const w = canvasElement.width;
+        const h = canvasElement.height;
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, w, h);
+        canvasCtx.translate(w, 0);
+        canvasCtx.scale(-1, 1);
+        canvasCtx.drawImage(results.image, 0, 0, w, h);
+        canvasCtx.restore();
+
+        // 1. Face
+        if (results.faceLandmarks) {
+            const lm = results.faceLandmarks;
+            
+            // Smile
+            const mouthW = dist(lm[61], lm[291]);
+            const faceW = dist(lm[234], lm[454]);
+            const ratio = faceW > 0 ? mouthW / faceW : 0;
+            
+            if (ratio > 0.36) {
+                elSmileVal.innerText = `Smiling (${ratio.toFixed(2)})`;
+                elSmileVal.style.color = "#00b894";
+            } else {
+                elSmileVal.innerText = "Neutral";
+                elSmileVal.style.color = "white";
+            }
+
+            // Gaze
+            const nose = lm[1];
+            const leftEar = lm[234];
+            const rightEar = lm[454];
+            const faceCenterX = (leftEar.x + rightEar.x) / 2;
+            const faceWidth = Math.abs(rightEar.x - leftEar.x);
+            const relNoseX = (nose.x - faceCenterX) / (faceWidth || 0.1);
+
+            drawPoint(nose, w, h, "#FFD700");
+
+            if (Math.abs(relNoseX) < 0.15) {
+                elGazeVal.innerText = "Eye Contact";
+                elGazeInd.className = "indicator status-good";
+                panelGaze.style.borderColor = "rgba(0, 184, 148, 0.5)";
+            } else {
+                elGazeVal.innerText = relNoseX < -0.15 ? "Look Right >" : "< Look Left";
+                elGazeInd.className = "indicator status-warn";
+                panelGaze.style.borderColor = "rgba(253, 203, 110, 0.5)";
+            }
+        }
+
+        // 2. Pose
+        if (results.poseLandmarks) {
+            const lm = results.poseLandmarks;
+            if (Math.abs(lm[15].x - lm[16].x) < 0.15) {
+                elPoseVal.innerText = "Crossed (Defensive)";
+                elPoseVal.style.color = "#ff7675";
+                panelPose.style.borderColor = "rgba(214, 48, 49, 0.5)";
+            } else {
+                elPoseVal.innerText = "Open";
+                elPoseVal.style.color = "#00b894";
+                panelPose.style.borderColor = "rgba(255, 255, 255, 0.1)";
+            }
+        }
+    }
+
+    // === 音訊分析 (後台運行) ===
+    function initAudio() {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'zh-TW';
+            recognition.onresult = (e) => {
+                const txt = e.results[e.results.length - 1][0].transcript;
+                accumulatedChars += txt.replace(/\s/g, '').length;
+            };
+            recognition.onend = () => { if(isRunning) recognition.start(); };
+            recognition.start();
+        }
+
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            microphone = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            microphone.connect(analyser);
+            
+            // 雖然不顯示，但我們還是收集數據，以免之後要開
+            setInterval(collectAudioData, 100);
+            setInterval(performAudioAnalysis, UPDATE_INTERVAL * 1000);
+        });
+    }
+
+    function collectAudioData() {
+        if(!analyser) return;
+        const buffer = new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(buffer);
+        const pitch = autoCorrelate(buffer, audioContext.sampleRate);
+        if(pitch !== -1 && pitch > 80 && pitch < 800) pitchBuffer.push(pitch);
+    }
+
+    function performAudioAnalysis() {
+        // 邏輯保留，僅寫入隱藏的 DOM 或變數
+        const speed = accumulatedChars / UPDATE_INTERVAL;
+        accumulatedChars = 0;
+        pitchBuffer = [];
+        // 如果未來要重新顯示，直接讀取 data 物件即可
+    }
+
+    // Tools
+    function dist(p1, p2) { return Math.sqrt(Math.pow(p1.x-p2.x,2)+Math.pow(p1.y-p2.y,2)); }
+    function drawPoint(p, w, h, color) {
+        const mx = (1-p.x)*w; const my = p.y*h;
+        canvasCtx.fillStyle = color;
+        canvasCtx.beginPath(); canvasCtx.arc(mx, my, 6, 0, 2*Math.PI); canvasCtx.fill();
+        canvasCtx.strokeStyle = "rgba(255,255,255,0.5)"; canvasCtx.lineWidth = 2; canvasCtx.stroke();
+    }
+    function autoCorrelate(buf, sr) {
+        let SIZE = buf.length; let rms = 0;
+        for(let i=0;i<SIZE;i++) rms+=buf[i]*buf[i];
+        if(Math.sqrt(rms/SIZE)<0.01) return -1;
+        let r1=0,r2=SIZE-1,thres=0.2;
+        for(let i=0;i<SIZE/2;i++) if(Math.abs(buf[i])<thres){r1=i;break;}
+        for(let i=1;i<SIZE/2;i++) if(Math.abs(buf[SIZE-i])<thres){r2=SIZE-i;break;}
+        buf = buf.slice(r1,r2); SIZE=buf.length;
+        let c=new Array(SIZE).fill(0);
+        for(let i=0;i<SIZE;i++) for(let j=0;j<SIZE-i;j++) c[i]+=buf[j]*buf[j+i];
+        let d=0; while(c[d]>c[d+1]) d++;
+        let maxval=-1, maxpos=-1;
+        for(let i=d;i<SIZE;i++) if(c[i]>maxval){maxval=c[i];maxpos=i;}
+        return sr/maxpos;
+    }
+
+    init();
+</script>
+
+</body>
+</html>

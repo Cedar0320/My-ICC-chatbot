@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CommAI系統</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- MediaPipe Libraries for Nonverbal Analysis -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Microsoft Clarity 追蹤程式碼 -->
+    <script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/s05kb253j7";
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "s05kb253j7");
+    </script>
+    <link rel="stylesheet" href="/css/styles.css">
+    <style>
+        /* Banner 的樣式 */
+        .site-banner {
+            background-color: #e93ae1; /* 粉色背景 */
+            color: white; /* 文字白色 */
+            text-align: center; /* 文字置中 */
+            padding: 15px 20px; /* 上下內邊距 */
+            font-size: 32px; /* 字體大小 */
+            font-weight: bold; /* 粗體 */
+            position: fixed; /* 固定在頁面頂部 */
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000; /* 保證在其他元素之上 */
+            display: flex;
+            justify-content: space-between; /* 左右佈局 */
+            align-items: center; /* 垂直置中 */
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2); /* 添加陰影效果 */
+        }
+
+        .site-banner .welcome {
+            font-size: 20px;
+            margin: 0;
+        }
+
+        .site-banner .logout-btn {
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .site-banner .grading-link {
+            color: white;
+            text-decoration: none;
+            font-size: 16px;
+            padding: 8px 15px;
+            border-radius: 5px;
+            background-color: rgba(255, 255, 255, 0.2);
+            transition: background-color 0.3s ease;
+            margin-right: 10px;
+        }
+
+        .site-banner .logout-btn:hover {
+            background: #d32f2f;
+        }
+
+        .content-container {
+            margin-top: 80px; /* 預留空間避免被 banner 遮擋 */
+        }
+
+        /* 更新容器佈局 - 讓它更接近滿版 */
+        .container {
+            display: flex;
+            gap: 15px; /* 減少間距 */
+            max-width: 95%; /* 改為百分比寬度，接近滿版 */
+            width: 95%;    /* 確保有足夠寬度 */
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* --- 側邊欄收合核心修正 --- */
+
+        /* 確保側邊欄在展開時能正常顯示內容 */
+        #practiceSidebar, .recordings-sidebar {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+
+        /* 增加側邊欄寬度，讓它們佔據更多空間 */
+        #practiceSidebar {
+            width: 22%; /* 增加寬度 */
+            max-width: 300px; /* 增加最大寬度 */
+            min-width: 200px; /* 增加最小寬度 */
+            overflow-y: auto;
+            border-right: 1px solid #ddd;
+            padding: 10px;
+        }
+
+        /* 錄音列表側邊欄 - 同樣增加寬度 */
+        .recordings-sidebar {
+            width: 22%; /* 增加寬度與左側一致 */
+            max-width: 300px; /* 增加最大寬度 */
+            min-width: 200px; /* 增加最小寬度 */
+            overflow-y: auto;
+            padding: 10px;
+            border-left: 1px solid #ddd;
+        }
+
+        /* 僅在 .collapsed 狀態下隱藏非按鈕的內容 */
+        #practiceSidebar.collapsed > *:not(.sidebar-toggle-btn):not(.sidebar-collapse-header),
+        .recordings-sidebar.collapsed > *:not(.sidebar-toggle-btn):not(.sidebar-collapse-header) {
+            display: none !important;
+        }
+
+        /* 修正收合後的容器寬度與邊界 */
+        #practiceSidebar.collapsed {
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+            padding: 0 !important;
+            border-right: none !important;
+            overflow: visible !important; /* 讓按鈕溢出顯示 */
+        }
+
+        .recordings-sidebar.collapsed {
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+            padding: 0 !important;
+            border-left: none !important;
+            overflow: visible !important;
+        }
+
+        /* 確保內容在展開時可見 */
+        #practiceSidebar:not(.collapsed) > *,
+        .recordings-sidebar:not(.collapsed) > * {
+            visibility: visible;
+        }
+
+        /* 調整主內容區域 */
+        .main-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-width: none; /* 移除最大寬度限制 */
+            min-width: 600px; /* 保持最小寬度 */
+            margin: 0; /* 移除居中，讓它自然填充 */
+        }
+        
+
+        
+        /* 增強響應式設計 */
+        @media (max-width: 1200px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            #practiceSidebar, .recordings-sidebar {
+                width: 100%;
+                max-width: 100%;
+                height: auto;
+                max-height: 300px;
+                position: static;
+            }
+            
+            .main-section {
+                max-width: 100%;
+                min-width: unset;
+            }
+        }
+        
+        /* 對話與角色並排響應式 */
+        @media (max-width: 768px) {
+            .dialogue-with-avatar {
+                flex-direction: column;
+            }
+            
+            #npcAvatarPanel {
+                width: 100%;
+                max-width: 100%;
+            }
+            
+            .npc-avatar-container {
+                height: 220px;
+            }
+        }
+
+        .technique-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .technique-link {
+            display: block;
+            padding: 10px 15px;
+            background-color: #f5f5f5;
+            color: #333;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .technique-link:hover {
+            background-color: #e93ae1;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        /* 非語言分析視窗樣式 */
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #output_canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+            background: #222; /* 深灰色背景,便於調試 */
+            min-height: 480px; /* 最小高度 */
+        }
+
+        /* HUD 面板 */
+        .hud-panel {
+            position: absolute;
+            padding: 10px 15px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            color: white;
+            font-size: 0.9rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            min-width: 140px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .hud-tl { top: 10px; left: 10px; }
+        .hud-tr { top: 10px; right: 10px; justify-content: flex-end; }
+        .hud-bl { bottom: 10px; left: 10px; }
+        .hud-br { bottom: 10px; right: 10px; justify-content: flex-end; }
+
+        .indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            box-shadow: 0 0 6px currentColor;
+        }
+
+        .status-good { color: #00b894; background: #00b894; }
+        .status-warn { color: #fdcb6e; background: #fdcb6e; }
+        .status-bad { color: #d63031; background: #d63031; }
+
+        .hud-label {
+            font-size: 0.7em;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .hud-value {
+            font-size: 1em;
+            font-weight: bold;
+            margin-top: 2px;
+        }
+
+        .icon {
+            font-size: 1.3em;
+        }
+        /* 角色選擇器樣式 */
+        #characterSelect {
+            transition: all 0.3s ease;
+        }
+        
+        #characterSelect:hover {
+            border-color: #e93ae1;
+            box-shadow: 0 0 5px rgba(233, 58, 225, 0.3);
+        }
+        
+        #characterSelect:focus {
+            outline: none;
+            border-color: #e93ae1;
+            box-shadow: 0 0 8px rgba(233, 58, 225, 0.5);
+        }
+        
+        /* 對話與角色並排容器 - 改為垂直布局 */
+        .dialogue-with-avatar {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            align-items: center;
+            width: 100%;
+        }
+        
+        /* NPC 面板樣式調整 - 放大並居中 */
+        #npcAvatarPanel {
+            width: 400px;
+            max-width: 90%;
+            margin: 0 auto;
+        }
+        
+        #npcAvatarPanel.panel {
+            background-color: rgba(255, 255, 255, 0.95);
+            border: 2px solid #ffffff;
+            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+        }
+        
+        #npcAvatarPanel h3 {
+            margin-top: 0;
+            color: #000000;
+            font-size: 20px;
+            text-align: center;
+        }
+        
+        /* 對話容器：包含對話框和輸入區 */
+        .dialogue-container {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+        
+        /* 對話框樣式 */
+        #dialogueDisplay {
+            flex: 1;
+            min-height: 300px;
+            max-height: 500px;
+            overflow-y: auto;
+            margin-bottom: 0 !important;
+            border-bottom-left-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
+        }
+        
+        /* RPG風格對話框 - 練習進行中 */
+        #dialogueDisplay.rpg-mode {
+            min-height: 150px;
+            max-height: 200px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+        
+        #dialogueDisplay.rpg-mode .message {
+            animation: slideInFromBottom 0.5s ease-out;
+            background: rgba(255, 255, 255, 0.95);
+            border: 2px solid #fff;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            max-width: 100%;
+        }
+        
+        @keyframes slideInFromBottom {
+            from { 
+                opacity: 0; 
+                transform: translateY(30px); 
+            }
+            to { 
+                opacity: 1; 
+                transform: translateY(0); 
+            }
+        }
+        
+        /* 輸入控制區域緊貼對話框 */
+        .dialogue-container .record-controls {
+            margin-top: 0 !important;
+            border-top-left-radius: 0 !important;
+            border-top-right-radius: 0 !important;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        /* NPC 角色容器樣式 - 只顯示角色圖片 */
+        .npc-avatar-container {
+            position: relative;
+            width: 100%;
+            height: 450px;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border-radius: 0;
+            box-shadow: none;
+            padding: 0;
+            overflow: hidden;
+        }
+        
+        .npc-avatar-container img {
+            width: 90%;
+            height: 90%;
+            max-width: 100%;
+            max-height: 100%;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            object-fit: contain;
+        }
+        
+        .npc-status-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 12px;
+            height: 12px;
+            background: #4caf50;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+            transition: all 0.3s ease;
+        }
+        
+        .npc-status-indicator.talking {
+            background: #ff9800;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { 
+                opacity: 1; 
+                transform: scale(1); 
+            }
+            50% { 
+                opacity: 0.6; 
+                transform: scale(1.2); 
+            }
+        }
+
+        /* --- 按鈕定位修正 (不再使用 fixed，改用 absolute 飄在邊緣) --- */
+        .sidebar-toggle-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 48px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            z-index: 1100; /* 高於內容 */
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
+
+        .sidebar-toggle-btn:hover {
+            background: #f5f5f5;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .sidebar-toggle-btn:active {
+            transform: translateY(-50%) scale(0.95);
+        }
+
+        /* 左側按鈕：展開時貼在右緣，收合時向右飄出 24px */
+        #practiceSidebar .sidebar-toggle-btn {
+            right: -12px;
+        }
+
+        #practiceSidebar.collapsed .sidebar-toggle-btn {
+            right: -24px;
+        }
+
+        /* 右側按鈕：展開時貼在左緣，收合時向左飄出 24px */
+        .recordings-sidebar .sidebar-toggle-btn {
+            left: -12px;
+        }
+
+        .recordings-sidebar.collapsed .sidebar-toggle-btn {
+            left: -24px;
+        }
+
+        /* 箭頭圖標 */
+        .sidebar-toggle-btn::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-top: 2px solid #666;
+            border-right: 2px solid #666;
+            display: block;
+        }
+
+        /* 左側邊欄箭頭 - 向左 */
+        #practiceSidebar .sidebar-toggle-btn::before {
+            transform: rotate(-135deg);
+            margin-right: -2px;
+        }
+
+        #practiceSidebar.collapsed .sidebar-toggle-btn::before {
+            transform: rotate(45deg);
+            margin-left: -2px;
+        }
+
+        /* 右側邊欄箭頭 - 向右 */
+        .recordings-sidebar .sidebar-toggle-btn::before {
+            transform: rotate(45deg);
+            margin-left: -2px;
+        }
+
+        .recordings-sidebar.collapsed .sidebar-toggle-btn::before {
+            transform: rotate(-135deg);
+            margin-right: -2px;
+        }
+
+        /* 內部區塊收合功能 */
+        .collapsible-section {
+            margin-bottom: 20px;
+        }
+
+        .collapsible-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 8px 0;
+            user-select: none;
+            transition: background-color 0.2s ease;
+        }
+
+        .collapsible-header:hover {
+            background-color: rgba(0, 0, 0, 0.02);
+            border-radius: 4px;
+        }
+
+        .collapsible-toggle {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: transform 0.3s ease, background-color 0.2s ease;
+        }
+
+        .collapsible-toggle:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+
+        .collapsible-toggle::before {
+            content: '';
+            width: 0;
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 6px solid #666;
+            transition: transform 0.3s ease;
+        }
+
+        .collapsible-section.collapsed .collapsible-toggle::before {
+            transform: rotate(-90deg);
+        }
+
+        .collapsible-content {
+            max-height: 1000px;
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+            opacity: 1;
+        }
+
+        .collapsible-section.collapsed .collapsible-content {
+            max-height: 0;
+            opacity: 0;
+        }
+
+        /* 調整原有標題樣式 */
+        .recordings-title, .feedback-section h4 {
+            margin: 0;
+            cursor: pointer;
+        }
+
+        /* 側邊欄頂部收合按鈕 */
+        .sidebar-collapse-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            margin: -10px -10px 15px -10px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        /* 收合狀態下的按鈕樣式 */
+        .collapsed .sidebar-collapse-header {
+            margin: 0;
+            padding: 12px 8px;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            justify-content: center;
+            border-bottom: none;
+            border-left: 1px solid #dee2e6;
+            border-right: 1px solid #dee2e6;
+        }
+
+        .sidebar-collapse-header:hover {
+            background: #e9ecef;
+        }
+
+        .sidebar-collapse-title {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .collapsed .sidebar-collapse-title {
+            font-size: 12px;
+        }
+
+        .sidebar-collapse-icon {
+            font-size: 16px;
+            color: #666;
+            transition: transform 0.2s ease;
+        }
+
+        .collapsed .sidebar-collapse-icon {
+            display: none;
+        }
+
+        .sidebar-collapse-header:hover .sidebar-collapse-icon {
+            color: #333;
+        }
+
+        /* 分頁樣式 */
+        .pagination-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            padding: 15px 10px;
+            margin-top: 10px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .pagination-btn {
+            padding: 6px 12px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.3s ease;
+            color: #333;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: #e93ae1;
+            color: white;
+            border-color: #e93ae1;
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: #f5f5f5;
+        }
+
+        .pagination-info {
+            font-size: 13px;
+            color: #666;
+            min-width: 80px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- 新增的 Banner -->
+    <div class="site-banner">
+        <span class="welcome" id="welcomeMessage">歡迎!</span>
+        <div>
+            <a href="grading-standards.html" class="grading-link">評分標準</a>
+            <a href="https://docs.google.com/forms/d/e/1FAIpQLSeXapgBUcNJtnGoJO96GTIrdBBnr7vLpAOgtVLVNbgVOMhlmw/viewform?usp=dialog" class="grading-link" target="_blank">問卷回饋</a>
+            <button id="logoutButton" class="logout-btn">登出</button>
+        </div>
+    </div>
+
+    <div class="content-container">
+        <div class="container">
+            <div id="loadingSpinner" class="spinner-overlay">
+                <div class="spinner"></div>
+            </div>
+
+            <div id="practiceSidebar" class="recordings-sidebar">
+                <button class="sidebar-toggle-btn" id="leftSidebarToggle" title="收合側邊欄"></button>
+                <div class="sidebar-collapse-header" id="leftCollapseBtn">
+                    <span class="sidebar-collapse-title">收合側邊欄</span>
+                    <span class="sidebar-collapse-icon">◀</span>
+                </div>
+                <div class="recordings-title">溝通技巧介紹</div>
+                <!-- 新增顯示區域 -->
+                <div class="technique-options">
+                    <a href="/i-message.html" class="technique-link">我訊息</a>
+                    <a href="/sandwich.html" class="technique-link">三明治溝通法</a>
+                    <a href="/comprehensive.html" class="technique-link">綜合溝通技巧</a>
+                </div>
+
+                <div class="recordings-title">
+                    練習紀錄
+                    <span class="recordings-count" id="practicesCount"></span>
+                </div>
+                <ul id="practiceList"></ul>
+
+                <!-- 練習記錄分頁控件 -->
+                <div class="pagination-container" id="practicesPagination" style="display: none;">
+                    <button class="pagination-btn" id="practicesPrevBtn" onclick="changePracticePage(-1)">上一頁</button>
+                    <span class="pagination-info" id="practicesPaginationInfo">第 1 頁</span>
+                    <button class="pagination-btn" id="practicesNextBtn" onclick="changePracticePage(1)">下一頁</button>
+                </div>
+
+                <!--0301更新 空練習提示 -->
+                <div id="emptyPracticesGuide" class="empty-practices-message" style="display: none;">
+                    <p><strong>還沒有完成的練習</strong></p>
+                    <div class="guide-step">
+                        <span class="guide-step-number">1</span>選擇技巧與模式
+                    </div>
+                    <div class="guide-step">
+                        <span class="guide-step-number">2</span>點擊"開始練習"
+                    </div>
+                    <div class="guide-step">
+                        <span class="guide-step-number">3</span>完成對話練習
+                    </div>
+                    <p>完成練習並獲得分析評分後，才會顯示在此處</p>
+                </div>
+            </div>
+
+            <div class="main-section">
+                
+                <div id="techniqueIntro" class="panel" style="display: none;"></div>
+                <div class="panel">
+                    <select id="techniqueSelect">
+                        <option value="我訊息">我訊息</option>
+                        <option value="三明治溝通法">三明治溝通法</option>
+                        <option value="綜合溝通技巧">綜合溝通技巧</option>
+                    </select>
+                    <select id="difficultySelect">
+                        <option value="簡單">基礎模式</option>
+                        <option value="挑戰">挑戰模式</option>
+                    </select>
+
+                    <div style="margin: 10px 0;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #333;">
+                            家長性別：
+                        </label>
+                        <select id="characterSelect" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 16px; background: white; cursor: pointer;">
+                            <option value="mother">女生</option>
+                            <option value="father">男生</option>
+                        </select>
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="enableNonverbalDetection" style="width: 18px; height: 18px; cursor: pointer;">
+                            <span style="font-size: 16px; font-weight: 500;">啟用非語言行為偵測</span>
+                        </label>
+                        <p style="margin: 5px 0 0 26px; font-size: 13px; color: #666;">
+                            (啟用後將自動開啟前鏡頭,並在對話過程中分析您的眼神、表情、姿態及手勢)
+                        </p>
+                    </div>
+                    <button id="startPracticeBtn">開始練習</button>
+                </div>
+
+                <div id="scenarioDisplay" class="panel"></div>
+                <div id="taskDisplay" class="panel" style="display: none;"></div>
+                <div id="reminderDisplay" class="panel" style="display: none;"></div>
+
+                <!-- 對話與角色垂直排列容器 -->
+                <div class="dialogue-with-avatar" id="dialogueWithAvatar" style="display: none;">
+                    <!-- 上方：NPC 角色動畫面板 -->
+                    <div id="npcAvatarPanel" class="panel">
+                        <h3 style="margin-bottom: 15px;">👤 家長性別</h3>
+                        <div class="npc-avatar-container">
+                            <div class="npc-status-indicator" id="npcStatusIndicator"></div>
+                            <img id="npcAvatar" src="" alt="家長性別">
+                        </div>
+                        <audio id="npcAudioPlayer" style="display: none;"></audio>
+                    </div>
+
+                    <!-- 下方：對話區域容器 -->
+                    <div class="dialogue-container">
+                        <div id="dialogueDisplay" class="panel"></div>
+
+                        <!-- 輸入控制區域 -->
+                        <div class="record-controls panel">
+                            <div class="input-method-selector" id="inputMethodSelector">
+                                <label>
+                                    <input type="radio" name="inputMethod" value="voice" checked> 語音輸入
+                                </label>
+                                <label id="textInputLabel">
+                                    <input type="radio" name="inputMethod" value="text"> 文字輸入
+                                </label>
+                            </div>
+                            <div id="voiceInputControls">
+                                <button id="startRecordBtn">開始錄音</button>
+                                <button id="stopRecordBtn" disabled>停止錄音</button>
+                                <div id="countdownDisplay" style="font-size: 1.2em; font-weight: bold; color: red; margin-top: 10px;"></div>
+                                <div class="recording-limit-info">
+                                    錄音時間限制: <span class="recording-limit-value">120秒</span>
+                                    <span class="recording-tip">* 超過時間限制將自動停止錄音</span>
+                                </div>
+                            </div>
+                            <div id="textInputControls" style="display: none;">
+                                <textarea id="textInput" placeholder="請在此輸入您的回應..." rows="4" style="width: 100%; margin-bottom: 10px;"></textarea>
+                                <button id="submitTextBtn">提交文字</button>
+                            </div>
+                            <div id="dialogueActionBtns" style="display: none; margin-top: 12px; gap: 10px; flex-wrap: wrap;">
+                                <button id="endDialogueBtn" style="background: #f44336; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 15px;">結束對話</button>
+                                <button id="extendTimeBtn" style="display: none; background: #ff9800; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 15px;">延長30秒</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                
+                <div id="recordStatus" class="status"></div>
+                <div id="audioPlayback" class="audio-playback" style="display: none;"></div>
+
+                <div id="analysisDisplay" class="panel" style="display: none;">
+                    <h3>分析結果</h3>
+                    <div id="analysisContent"></div>
+                </div>
+
+                <!-- 非語言數據分析顯示區域 -->
+                <div id="nonverbalDataDisplay" class="panel" style="display: none;">
+                    <h3>📊 非語言溝通表現分析</h3>
+                    <div id="nonverbalDataContent"></div>
+                </div>
+
+                <!-- 非語言行為分析視窗 -->
+                <div id="nonverbalWindow" class="panel" style="display: none;">
+                    <h3>非語言行為即時分析</h3>
+                    <div class="video-wrapper">
+                        <video id="input_video" autoplay playsinline style="display: none;"></video>
+                        <canvas id="output_canvas"></canvas>
+
+                        <!-- HUD 面板 -->
+                        <div class="hud-panel hud-tl" id="hud-gaze">
+                            <div class="indicator status-warn" id="ind-gaze"></div>
+                            <div>
+                                <div class="hud-label">眼神接觸</div>
+                                <div class="hud-value" id="val-gaze">等待中</div>
+                            </div>
+                        </div>
+
+                        <div class="hud-panel hud-tr" id="hud-smile">
+                            <div>
+                                <div class="hud-label">表情</div>
+                                <div class="hud-value" id="val-smile">--</div>
+                            </div>
+                            <span class="icon">😊</span>
+                        </div>
+
+                        <div class="hud-panel hud-bl" id="hud-pose">
+                            <span class="icon">🛡️</span>
+                            <div>
+                                <div class="hud-label">姿態</div>
+                                <div class="hud-value" id="val-pose">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="recordings-sidebar" id="recordingsSidebar">
+                <button class="sidebar-toggle-btn" id="rightSidebarToggle" title="收合側邊欄"></button>
+                <div class="sidebar-collapse-header" id="rightCollapseBtn">
+                    <span class="sidebar-collapse-title">收合側邊欄</span>
+                    <span class="sidebar-collapse-icon">▶</span>
+                </div>
+                
+                <!-- 錄音歷史區塊 -->
+                <div class="collapsible-section" id="recordingsSection">
+                    <div class="collapsible-header">
+                        <div class="recordings-title">錄音歷史</div>
+                        <div class="collapsible-toggle"></div>
+                    </div>
+                    <div class="collapsible-content">
+                        <div id="recordingsList"></div>
+                    </div>
+                </div>
+
+                <!-- 學習省思紀錄區塊 -->
+                <div class="collapsible-section" id="feedbackSection">
+                    <div class="collapsible-header">
+                        <h4>📝 學習省思紀錄</h4>
+                        <div class="collapsible-toggle"></div>
+                    </div>
+                    <div class="collapsible-content">
+                        <div class="feedback-section">
+                            <div id="feedbackList" class="feedback-list">
+                                <p class="no-feedback">目前尚無學習省思紀錄。</p>
+                            </div>
+                            <textarea id="feedbackInput" class="feedback-input" placeholder="本次練習做得好的地方、可以改進的地方或其他..."></textarea>
+                            <button id="submitFeedbackBtn" class="feedback-btn">提交紀錄</button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/main.js"></script>
+    <script src="/js/npcIntegration.js"></script>
+    <script src="/js/onboarding.js"></script>
+    <script type="module" src="/js/nonverbal-analysis.js"></script>
+    
+    <!-- 側邊欄收合功能 -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const leftSidebar = document.getElementById('practiceSidebar');
+            const rightSidebar = document.getElementById('recordingsSidebar');
+            const leftToggleBtn = document.getElementById('leftSidebarToggle');
+            const rightToggleBtn = document.getElementById('rightSidebarToggle');
+
+            function updateSidebarState(sidebar, isCollapsed) {
+                if (isCollapsed) {
+                    sidebar.classList.add('collapsed');
+                } else {
+                    sidebar.classList.remove('collapsed');
+                }
+                
+                // 更新頂部收合按鈕的文字
+                const collapseHeader = sidebar.querySelector('.sidebar-collapse-header');
+                if (collapseHeader) {
+                    const title = collapseHeader.querySelector('.sidebar-collapse-title');
+                    const icon = collapseHeader.querySelector('.sidebar-collapse-icon');
+                    if (title) {
+                        title.textContent = isCollapsed ? '展開側邊欄' : '收合側邊欄';
+                    }
+                    if (icon) {
+                        // 左側欄：收合時向右箭頭，展開時向左箭頭
+                        // 右側欄：收合時向左箭頭，展開時向右箭頭
+                        if (sidebar.id === 'practiceSidebar') {
+                            icon.textContent = isCollapsed ? '▶' : '◀';
+                        } else {
+                            icon.textContent = isCollapsed ? '◀' : '▶';
+                        }
+                    }
+                }
+                
+                // 觸發視窗 resize 事件，讓 Chart.js 自動調整中間區域寬度
+                window.dispatchEvent(new Event('resize'));
+            }
+
+            // 初始化
+            updateSidebarState(leftSidebar, localStorage.getItem('leftSidebarCollapsed') === 'true');
+            updateSidebarState(rightSidebar, localStorage.getItem('rightSidebarCollapsed') === 'true');
+
+            leftToggleBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const isCurrentlyCollapsed = leftSidebar.classList.contains('collapsed');
+                const isNowCollapsed = !isCurrentlyCollapsed;
+                updateSidebarState(leftSidebar, isNowCollapsed);
+                localStorage.setItem('leftSidebarCollapsed', isNowCollapsed);
+                // 即時更新 Title
+                this.title = isNowCollapsed ? '展開側邊欄' : '收合側邊欄';
+            });
+
+            rightToggleBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const isCurrentlyCollapsed = rightSidebar.classList.contains('collapsed');
+                const isNowCollapsed = !isCurrentlyCollapsed;
+                updateSidebarState(rightSidebar, isNowCollapsed);
+                localStorage.setItem('rightSidebarCollapsed', isNowCollapsed);
+                // 即時更新 Title
+                this.title = isNowCollapsed ? '展開側邊欄' : '收合側邊欄';
+            });
+
+            // 頂部收合按鈕
+            const leftCollapseBtn = document.getElementById('leftCollapseBtn');
+            const rightCollapseBtn = document.getElementById('rightCollapseBtn');
+
+            if (leftCollapseBtn) {
+                leftCollapseBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    leftToggleBtn.click();
+                });
+            }
+
+            if (rightCollapseBtn) {
+                rightCollapseBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    rightToggleBtn.click();
+                });
+            }
+
+            // 內部區塊收合功能
+            const collapsibleSections = document.querySelectorAll('.collapsible-section');
+            
+            collapsibleSections.forEach(section => {
+                const header = section.querySelector('.collapsible-header');
+                const sectionId = section.id;
+                
+                // 從 localStorage 讀取狀態
+                const isCollapsed = localStorage.getItem(`section_${sectionId}_collapsed`) === 'true';
+                if (isCollapsed) {
+                    section.classList.add('collapsed');
+                }
+                
+                header.addEventListener('click', function() {
+                    section.classList.toggle('collapsed');
+                    const collapsed = section.classList.contains('collapsed');
+                    localStorage.setItem(`section_${sectionId}_collapsed`, collapsed);
+                });
+            });
+
+            // 鍵盤快捷鍵支持（可選）
+            document.addEventListener('keydown', function(e) {
+                // Ctrl/Cmd + B 切換左側邊欄
+                if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+                    e.preventDefault();
+                    leftToggleBtn.click();
+                }
+                // Ctrl/Cmd + Shift + B 切換右側邊欄
+                if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'B') {
+                    e.preventDefault();
+                    rightToggleBtn.click();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
