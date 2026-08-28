@@ -349,7 +349,7 @@
             <h2>使用者列表</h2>
 
             <div class="search-bar">
-                <input type="text" id="searchInput" placeholder="搜尋使用者名稱或電子郵件...">
+                <input type="text" id="searchInput" placeholder="搜尋使用者名稱、Email、學號或系所...">
                 <button onclick="searchUsers()">搜尋</button>
             </div>
 
@@ -737,6 +737,26 @@
             }
         }
 
+        function formatGender(value) {
+            return { male: '男', female: '女' }[value] || '未填寫';
+        }
+
+        function formatEducationLevel(value) {
+            return { undergraduate: '大學部', master: '碩士' }[value] || '未填寫';
+        }
+
+        function formatGrade(value) {
+            return {
+                '1': '大一',
+                '2': '大二',
+                '3': '大三',
+                '4': '大四',
+                '5': '碩一（含夜碩）',
+                '6': '碩二（含夜碩）',
+                '7': '碩三（含夜碩）'
+            }[value] || '未填寫';
+        }
+
         // 顯示使用者列表
         function displayUsers(users) {
             const container = document.getElementById('usersTableContainer');
@@ -752,6 +772,8 @@
                         <tr>
                             <th>使用者名稱</th>
                             <th>電子郵件</th>
+                            <th>學號</th>
+                            <th>系所</th>
                             <th>角色</th>
                             <th>練習次數</th>
                             <th>錄音數</th>
@@ -768,6 +790,8 @@
                     <tr>
                         <td>${user.username}</td>
                         <td>${user.email}</td>
+                        <td>${user.studentId || '未填寫'}</td>
+                        <td>${user.department || '未填寫'}</td>
                         <td><span class="badge ${user.role === 'admin' ? 'badge-admin' : 'badge-user'}">${user.role === 'admin' ? '管理員' : '使用者'}</span></td>
                         <td>${user.stats.totalPractices}</td>
                         <td>${user.stats.totalRecordings}</td>
@@ -849,6 +873,11 @@
                 <div style="margin-bottom: 20px;">
                     <h3>${user.username}</h3>
                     <p>電子郵件: ${user.email}</p>
+                    <p>學號: ${user.studentId || '未填寫'}</p>
+                    <p>性別: ${formatGender(user.gender)}</p>
+                    <p>學制: ${formatEducationLevel(user.educationLevel)}</p>
+                    <p>系所: ${user.department || '未填寫'}</p>
+                    <p>年級: ${formatGrade(user.grade)}</p>
                     <p>角色: <span class="badge ${user.role === 'admin' ? 'badge-admin' : 'badge-user'}">${user.role === 'admin' ? '管理員' : '使用者'}</span></p>
                     <p>註冊時間: ${new Date(user.createdAt).toLocaleString('zh-TW')}</p>
                 </div>

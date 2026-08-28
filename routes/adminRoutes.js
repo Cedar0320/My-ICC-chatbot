@@ -8,6 +8,10 @@ const adminAuth = require('../middleware/adminAuth');
 
 console.log('✅ adminRoutes.js 已載入');
 
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * 檢查非語言數據是否有效（有實際測量值，不全為0或undefined）
  */
@@ -116,11 +120,15 @@ router.get('/users', adminAuth, async (req, res) => {
     try {
         const { page = 1, limit = 20, search = '' } = req.query;
 
-        const query = search
+        const searchText = typeof search === 'string' ? search.trim() : '';
+        const safeSearch = searchText ? escapeRegex(searchText) : '';
+        const query = safeSearch
             ? {
                 $or: [
-                    { username: { $regex: search, $options: 'i' } },
-                    { email: { $regex: search, $options: 'i' } }
+                    { username: { $regex: safeSearch, $options: 'i' } },
+                    { email: { $regex: safeSearch, $options: 'i' } },
+                    { studentId: { $regex: safeSearch, $options: 'i' } },
+                    { department: { $regex: safeSearch, $options: 'i' } }
                 ]
             }
             : {};

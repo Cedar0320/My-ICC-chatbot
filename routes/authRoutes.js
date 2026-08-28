@@ -11,11 +11,57 @@ const config = require('../config/config');
 // 註冊
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const {
+      username,
+      email,
+      password,
+      studentId,
+      gender,
+      educationLevel,
+      department,
+      grade
+    } = req.body;
+
+    const normalizedUsername = username?.trim();
+    const normalizedEmail = email?.trim().toLowerCase();
+    const normalizedStudentId = studentId?.trim();
+    const normalizedDepartment = department?.trim();
+
+    if (!normalizedUsername || !normalizedEmail || !password ||
+        !normalizedStudentId || !gender || !educationLevel ||
+        !normalizedDepartment || !grade) {
+      return res.status(400).json({
+        success: false,
+        message: '請完整填寫所有註冊資料'
+      });
+    }
+
+    const allowedGenders = ['male', 'female'];
+    const allowedEducationLevels = ['undergraduate', 'master'];
+    const allowedGrades = ['1', '2', '3', '4', '5', '6', '7'];
+
+    if (!allowedGenders.includes(gender) ||
+        !allowedEducationLevels.includes(educationLevel) ||
+        !allowedGrades.includes(grade)) {
+      return res.status(400).json({
+        success: false,
+        message: '性別、學制或年級資料格式不正確'
+      });
+    }
+
+    const isUndergraduateGrade = educationLevel === 'undergraduate' && ['1', '2', '3', '4'].includes(grade);
+    const isMasterGrade = educationLevel === 'master' && ['5', '6', '7'].includes(grade);
+
+    if (!isUndergraduateGrade && !isMasterGrade) {
+      return res.status(400).json({
+        success: false,
+        message: '學制與年級不相符'
+      });
+    }
 
     // 檢查使用者是否已存在
     const existingUser = await User.findOne({
-      $or: [{ email }, { username }]
+      $or: [{ email: normalizedEmail }, { username: normalizedUsername }]
     });
 
     if (existingUser) {
@@ -27,9 +73,14 @@ router.post('/register', async (req, res) => {
 
     // 創建新使用者
     const user = new User({
-      username,
-      email,
-      password
+      username: normalizedUsername,
+      email: normalizedEmail,
+      password,
+      studentId: normalizedStudentId,
+      gender,
+      educationLevel,
+      department: normalizedDepartment,
+      grade
     });
 
     await user.save();
