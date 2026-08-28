@@ -1872,10 +1872,11 @@ function playAudio(audioFilePath) {
 // 背景產生 TTS，完成後自動播放並更新訊息泡泡的播放按鈕
 async function fetchTtsAndPlay(text, voice, messageId) {
     try {
+        if (!currentPracticeId) return;
         const res = await fetchWithAuth('/api/dialogue/tts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, voice })
+            body: JSON.stringify({ text, voice, practiceId: currentPracticeId })
         });
         const data = await res.json();
         if (!data.success || !data.audioFilePath) return;
