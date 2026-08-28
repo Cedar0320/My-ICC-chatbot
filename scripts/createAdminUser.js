@@ -5,7 +5,9 @@ const config = require('../config/config');
 async function createAdminUser() {
     try {
         // 連接資料庫
-        await mongoose.connect(config.mongodb.uri);
+        await mongoose.connect(config.mongodb.uri, {
+            dbName: 'communicationTraining'
+        });
         console.log('✅ MongoDB 已連接');
 
         // 檢查是否已經有 admin 使用者
