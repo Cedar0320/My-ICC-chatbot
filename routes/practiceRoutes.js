@@ -5,11 +5,11 @@ const mongoose = require('mongoose');
 const User = require('../models/User'); // 確保引入 User 模型
 const { 
   createPractice, 
-  updatePractice, 
   getPractices, 
   getPracticeDetails, 
   deletePractice 
 } = require('../services/practiceService');
+const { updateOwnedPractice: updatePractice } = require('../services/ownedPracticeService');
 
 // 獲取所有練習
 // router.get('/practices', async (req, res) => {
