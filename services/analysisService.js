@@ -4,15 +4,16 @@ const { updatePractice } = require('../services/practiceService'); // 引入練�
 
 /**
  * 分析對話並將結果保存到練習紀錄
+ * @param {String} userId 使用者的 ID
  * @param {String} practiceId 練習的 ID
  * @returns {String} 分析結果
  */
-async function analyzeDialogue(practiceId) {
+async function analyzeDialogue(userId, practiceId) {
 
-  const dialogueState = getDialogueState();
+  const dialogueState = getDialogueState(userId, practiceId);
 
-  if (!practiceId || !dialogueState || !dialogueState.history) {
-      throw new Error('無效的練習 ID 或對話狀態');
+  if (!userId || !practiceId || !dialogueState || !dialogueState.history) {
+      throw new Error('無效的使用者、練習 ID 或對話狀態');
   }
 
   const limitedHistory = dialogueState.history.slice(-15);
@@ -64,7 +65,7 @@ async function analyzeDialogue(practiceId) {
   try {
 
       const analysis = await generateChatResponse([{ role: "user", content: prompt }]);
-      await updatePractice(practiceId, { analysis });
+      await updatePractice(userId, practiceId, { analysis });
       return analysis;
 
   } catch (error) {
