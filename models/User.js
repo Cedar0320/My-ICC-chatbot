@@ -236,6 +236,31 @@ const UserSchema = new mongoose.Schema({
     enum: ['user', 'admin'],
     default: 'user'
   },
+  // 研究所需的使用者背景資料。
+  // 這些欄位不在 Schema 設為 required，以免既有帳號在儲存練習時驗證失敗；
+  // 新註冊者的必填檢查由 authRoutes.js 處理。
+  studentId: {
+    type: String,
+    trim: true,
+    maxlength: [50, '學號不能超過50個字元']
+  },
+  gender: {
+    type: String,
+    enum: ['male', 'female']
+  },
+  educationLevel: {
+    type: String,
+    enum: ['undergraduate', 'master']
+  },
+  department: {
+    type: String,
+    trim: true,
+    maxlength: [100, '系所名稱不能超過100個字元']
+  },
+  grade: {
+    type: String,
+    enum: ['1', '2', '3', '4', '5', '6', '7']
+  },
   createdAt: {
     type: Date,
     default: Date.now
