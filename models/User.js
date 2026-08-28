@@ -259,7 +259,8 @@ const UserSchema = new mongoose.Schema({
   },
   grade: {
     type: String,
-    enum: ['1', '2', '3', '4', '5', '6', '7']
+    // 數字值保留供既有帳號相容；新註冊資料直接保存中文年級。
+    enum: ['大一', '大二', '大三', '大四', '碩一', '碩二', '碩三', '1', '2', '3', '4', '5', '6', '7']
   },
   createdAt: {
     type: Date,

@@ -67,6 +67,20 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
       throw new Error(validationErrors.map(err => converter(err)).join(', '));
     }
 
+    // 在產生 AWS／OpenAI 費用前，先確認這筆練習屬於目前登入者。
+    const user = await User.findOne({
+      _id: req.user.id,
+      'practices._id': req.body.practiceId
+    });
+    if (!user) {
+      throw new Error(converter('練習記錄未找到或無權存取'));
+    }
+
+    const practice = user.practices.id(req.body.practiceId);
+    if (!practice) {
+      throw new Error(converter('練習記錄未找到或無權存取'));
+    }
+
     // 生成檔案名稱
     const fileName = `recording-${Date.now()}.wav`;
 
@@ -84,17 +98,6 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
       path: s3Result.Location,
       transcription
     };
-
-    // 更新用戶練習記錄
-    const user = await User.findOne({ 'practices._id': req.body.practiceId });
-    if (!user) {
-      throw new Error(converter('練習記錄未找到'));
-    }
-
-    const practice = user.practices.id(req.body.practiceId);
-    if (!practice) {
-      throw new Error(converter('練習記錄未找到'));
-    }
 
     // 避免重複儲存
     const isDuplicate = practice.recordings.some(r => r.path === newRecording.path);
@@ -127,7 +130,10 @@ router.get('/recordings', async (req, res) => {
       throw new Error('練習 ID 必須提供');
     }
 
-    const user = await User.findOne({ 'practices._id': practiceId });
+    const user = await User.findOne({
+      _id: req.user.id,
+      'practices._id': practiceId
+    });
     if (!user) {
       throw new Error('找不到相關練習記錄');
     }

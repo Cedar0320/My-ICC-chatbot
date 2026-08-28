@@ -12,19 +12,23 @@ const {
   resetCurrentRecordings 
 } = require('./dialogueService');
 const { analyzeDialogue } = require('./analysisService');
-const { updatePractice } = require('../services/practiceService'); // 引入更新練習的模組
+const { updateOwnedPractice: updatePractice } = require('./ownedPracticeService');
 
 /**
  * 處理對話提交邏輯
+ * @param {String} userId - 使用者的 ID
  * @param {String} transcription - 使用者的語音文字轉錄
  * @param {String} practiceId - 對應練習的 ID
  */
-async function handleDialogueSubmission(transcription, practiceId) {
+async function handleDialogueSubmission(userId, transcription, practiceId) {
   try {
     console.log('Handling dialogue submission for practice:', practiceId); // 調試用
 
     // 獲取當前對話狀態
-    const dialogueState = getDialogueState();
+    const dialogueState = getDialogueState(userId, practiceId);
+    if (!dialogueState) {
+      throw new Error('對話狀態丟失或無權存取');
+    }
 
     // 檢查輸入是否合法
     if (!transcription || !transcription.trim()) {
@@ -32,16 +36,16 @@ async function handleDialogueSubmission(transcription, practiceId) {
     }
 
     // 添加教師回應到歷史
-    addToHistory({ role: "導師", content: transcription });
-    incrementCount();
+    addToHistory(userId, practiceId, { role: "導師", content: transcription });
+    incrementCount(userId, practiceId);
 
     // 如果對話達到結束條件，執行分析
     if (dialogueState.count >= 12) {
       console.log('Dialogue complete, performing analysis'); // 調試用
-      const analysis = await analyzeDialogue(practiceId);
+      const analysis = await analyzeDialogue(userId, practiceId);
 
       // 保存歷史到練習紀錄（analysis 和 status 由 analyzeDialogue 內部處理）
-      await updatePractice(practiceId, { 
+      await updatePractice(userId, practiceId, { 
         history: dialogueState.history
       });
 
@@ -108,13 +112,13 @@ async function handleDialogueSubmission(transcription, practiceId) {
     }
 
     // 添加 AI 回應到歷史
-    addToHistory({ role: "家長", content: response });
+    addToHistory(userId, practiceId, { role: "家長", content: response });
 
     // 保存對話歷史到練習紀錄
-    await updatePractice(practiceId, { history: dialogueState.history });
+    await updatePractice(userId, practiceId, { history: dialogueState.history });
 
     // 重置當前錄音
-    resetCurrentRecordings();
+    resetCurrentRecordings(userId, practiceId);
 
     console.log('Dialogue submission completed successfully'); // 調試用
 

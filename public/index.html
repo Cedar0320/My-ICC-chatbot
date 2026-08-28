@@ -382,14 +382,14 @@
 
         // 根據學制添加相應的年級選項
         if (educationLevel === 'undergraduate') {
-            gradeSelect.innerHTML += '<option value="1">大一</option>';
-            gradeSelect.innerHTML += '<option value="2">大二</option>';
-            gradeSelect.innerHTML += '<option value="3">大三</option>';
-            gradeSelect.innerHTML += '<option value="4">大四</option>';
+            gradeSelect.innerHTML += '<option value="大一">大一</option>';
+            gradeSelect.innerHTML += '<option value="大二">大二</option>';
+            gradeSelect.innerHTML += '<option value="大三">大三</option>';
+            gradeSelect.innerHTML += '<option value="大四">大四</option>';
         } else if (educationLevel === 'master') {
-            gradeSelect.innerHTML += '<option value="5">碩一 (含夜碩)</option>';
-            gradeSelect.innerHTML += '<option value="6">碩二 (含夜碩)</option>';
-            gradeSelect.innerHTML += '<option value="7">碩三 (含夜碩)</option>';
+            gradeSelect.innerHTML += '<option value="碩一">碩一 (含夜碩)</option>';
+            gradeSelect.innerHTML += '<option value="碩二">碩二 (含夜碩)</option>';
+            gradeSelect.innerHTML += '<option value="碩三">碩三 (含夜碩)</option>';
         }
     }
         async function handleRegister(event) {

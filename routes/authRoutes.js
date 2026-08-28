@@ -36,21 +36,33 @@ router.post('/register', async (req, res) => {
       });
     }
 
+    // 舊版頁面可能仍送出 1～7；統一轉成中文後再寫入資料庫。
+    const legacyGradeMap = {
+      '1': '大一',
+      '2': '大二',
+      '3': '大三',
+      '4': '大四',
+      '5': '碩一',
+      '6': '碩二',
+      '7': '碩三'
+    };
+    const normalizedGrade = legacyGradeMap[grade] || grade;
+
     const allowedGenders = ['male', 'female'];
     const allowedEducationLevels = ['undergraduate', 'master'];
-    const allowedGrades = ['1', '2', '3', '4', '5', '6', '7'];
+    const allowedGrades = ['大一', '大二', '大三', '大四', '碩一', '碩二', '碩三'];
 
     if (!allowedGenders.includes(gender) ||
         !allowedEducationLevels.includes(educationLevel) ||
-        !allowedGrades.includes(grade)) {
+        !allowedGrades.includes(normalizedGrade)) {
       return res.status(400).json({
         success: false,
         message: '性別、學制或年級資料格式不正確'
       });
     }
 
-    const isUndergraduateGrade = educationLevel === 'undergraduate' && ['1', '2', '3', '4'].includes(grade);
-    const isMasterGrade = educationLevel === 'master' && ['5', '6', '7'].includes(grade);
+    const isUndergraduateGrade = educationLevel === 'undergraduate' && ['大一', '大二', '大三', '大四'].includes(normalizedGrade);
+    const isMasterGrade = educationLevel === 'master' && ['碩一', '碩二', '碩三'].includes(normalizedGrade);
 
     if (!isUndergraduateGrade && !isMasterGrade) {
       return res.status(400).json({
@@ -80,7 +92,7 @@ router.post('/register', async (req, res) => {
       gender,
       educationLevel,
       department: normalizedDepartment,
-      grade
+      grade: normalizedGrade
     });
 
     await user.save();
