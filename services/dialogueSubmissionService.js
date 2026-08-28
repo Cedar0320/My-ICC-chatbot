@@ -12,7 +12,7 @@ const {
   resetCurrentRecordings 
 } = require('./dialogueService');
 const { analyzeDialogue } = require('./analysisService');
-const { updatePractice } = require('../services/practiceService'); // 引入更新練習的模組
+const { updateOwnedPractice: updatePractice } = require('./ownedPracticeService');
 
 /**
  * 處理對話提交邏輯
