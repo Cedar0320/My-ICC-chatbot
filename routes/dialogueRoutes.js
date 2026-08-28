@@ -559,11 +559,15 @@ const scenarios = require('../data/scenarios');
 const mongoose = require('mongoose');
 const {
   addToHistory,
-  incrementCount
+  incrementCount,
+  resetDialogueState,
+  updateDialogueState,
+  getDialogueState,
+  deleteDialogueState
 } = require('../services/dialogueService');
 const { analyzeDialogue } = require('../services/analysisService');
-const { updatePractice } = require('../services/practiceService'); // 匯入練習服務模組
-const { resetDialogueState, updateDialogueState, getDialogueState } = require('../services/dialogueService'); // 匯入對話狀態管理
+const { getPracticeDetails } = require('../services/practiceService');
+const { updateOwnedPractice: updatePractice } = require('../services/ownedPracticeService');
 const { generateChatResponse, generateSpeech } = require('../services/openaiService'); // 匯入 OpenAI API 工具和 generateSpeech
 const path = require('path');
 
@@ -653,6 +657,7 @@ function validateNonverbalData(data) {
 router.post('/start-dialogue', async (req, res) => {
     try {
         const { technique, practiceId, difficulty, specifiedScenario } = req.body;
+        const userId = req.user.id;
 
         if (!technique || !practiceId || !difficulty) {
             console.error('缺少必要參數:', { technique, practiceId, difficulty });
@@ -672,7 +677,9 @@ router.post('/start-dialogue', async (req, res) => {
             });
         }
 
-        resetDialogueState(technique);
+        // 先確認練習屬於目前登入者，再建立獨立對話狀態。
+        await getPracticeDetails(userId, practiceId);
+        resetDialogueState(userId, practiceId, technique);
 
         const parentPersonalities = difficulty === '挑戰'
             ? [
@@ -717,7 +724,7 @@ router.post('/start-dialogue', async (req, res) => {
         const { scenario } = parsedResponse;
 
         // 對話歷史從空白開始，學生先開口
-        updateDialogueState({
+        updateDialogueState(userId, practiceId, {
             scenario,
             parentPersonality: selectedPersonality,
             history: [],
@@ -726,7 +733,7 @@ router.post('/start-dialogue', async (req, res) => {
             challengeStartTime: difficulty === '挑戰' ? Date.now() : null
         });
 
-        await updatePractice(practiceId, { scenario });
+        await updatePractice(userId, practiceId, { scenario });
 
         res.json({
             success: true,
@@ -806,6 +813,7 @@ function parseInitialResponse(response) {
 router.post('/continue-dialogue', async (req, res) => {
     try {
         const { userResponse, practiceId, challengeTimeOver, nonverbalData, characterVoice } = req.body;
+        const userId = req.user.id;
         console.log("收到請求：", req.body);
 
         // 如果有非語言數據，記錄到日誌
@@ -817,7 +825,7 @@ router.post('/continue-dialogue', async (req, res) => {
             throw new Error('練習 ID 缺失');
         }
 
-        const dialogueState = getDialogueState();
+        const dialogueState = getDialogueState(userId, practiceId);
         if (!dialogueState || !Array.isArray(dialogueState.history)) {
             throw new Error('對話狀態丟失或無效');
         }
@@ -831,14 +839,15 @@ router.post('/continue-dialogue', async (req, res) => {
 
         // 如果挑戰模式的倒計時結束，直接執行分析
         if (dialogueState.challengeMode && challengeTimeOver) {
-            const analysis = await analyzeDialogue(practiceId);
+            const analysis = await analyzeDialogue(userId, practiceId);
             
             // 保存對話完成狀態和分析結果到練習紀錄
-            await updatePractice(practiceId, {
+            await updatePractice(userId, practiceId, {
                 history: dialogueState.history, // 直接覆蓋歷史記錄
                 analysis
             });
             
+            deleteDialogueState(userId, practiceId);
             return res.json({ 
                 completed: true, 
                 analysis,
@@ -864,20 +873,21 @@ router.post('/continue-dialogue', async (req, res) => {
                 historyEntry.nonverbalData = validatedNonverbalData;
             }
 
-            addToHistory(historyEntry);
-            incrementCount();
+            addToHistory(userId, practiceId, historyEntry);
+            incrementCount(userId, practiceId);
         }
 
         // 安全上限：基礎模式 24 句（12 輪），前端已透過「結束對話」按鈕控制流程
         if (!dialogueState.challengeMode && dialogueState.count >= 24) {
-            const analysis = await analyzeDialogue(practiceId);
+            const analysis = await analyzeDialogue(userId, practiceId);
             
             // 保存對話完成狀態和分析結果到練習紀錄
-            await updatePractice(practiceId, {
+            await updatePractice(userId, practiceId, {
                 history: dialogueState.history, // 直接覆蓋歷史記錄
                 analysis
             });
             
+            deleteDialogueState(userId, practiceId);
             return res.json({ 
                 completed: true, 
                 analysis,
@@ -954,10 +964,10 @@ ${difficultyLevel}
             throw new Error('AI 回應為空');
         }
 
-        addToHistory({ role: "家長", content: aiResponse });
-        incrementCount();
+        addToHistory(userId, practiceId, { role: "家長", content: aiResponse });
+        incrementCount(userId, practiceId);
 
-        await updatePractice(practiceId, {
+        await updatePractice(userId, practiceId, {
             history: dialogueState.history,
             completed: false
         });
@@ -982,10 +992,19 @@ ${difficultyLevel}
 // 背景 TTS：前端取得文字後另行呼叫，產生語音並回傳路徑
 router.post('/tts', async (req, res) => {
     try {
-        const { text, voice } = req.body;
+        const { text, voice, practiceId } = req.body;
+        if (!practiceId || !mongoose.Types.ObjectId.isValid(practiceId)) {
+            return res.status(400).json({ success: false, error: '有效的 practiceId 為必填' });
+        }
         if (!text || typeof text !== 'string' || !text.trim()) {
             return res.status(400).json({ success: false, error: 'text 為必填' });
         }
+        if (text.length > 1000) {
+            return res.status(400).json({ success: false, error: 'TTS 文字不可超過1000字' });
+        }
+
+        // 產生需付費的語音前，確認練習屬於目前登入者。
+        await getPracticeDetails(req.user.id, practiceId);
         const generatedPath = await generateSpeech(text.trim(), voice || 'nova');
         const audioFilePath = `/audio/${path.basename(generatedPath)}`;
         res.json({ success: true, audioFilePath });
@@ -999,18 +1018,20 @@ router.post('/tts', async (req, res) => {
 router.post('/end-dialogue', async (req, res) => {
     try {
         const { practiceId } = req.body;
+        const userId = req.user.id;
         if (!practiceId) throw new Error('練習 ID 缺失');
 
-        const dialogueState = getDialogueState();
+        const dialogueState = getDialogueState(userId, practiceId);
         if (!dialogueState) throw new Error('對話狀態丟失');
 
-        const analysis = await analyzeDialogue(practiceId);
+        const analysis = await analyzeDialogue(userId, practiceId);
 
-        await updatePractice(practiceId, {
+        await updatePractice(userId, practiceId, {
             history: dialogueState.history,
             analysis
         });
 
+        deleteDialogueState(userId, practiceId);
         return res.json({ completed: true, analysis, practiceId });
     } catch (error) {
         console.error('end-dialogue 錯誤:', error);
