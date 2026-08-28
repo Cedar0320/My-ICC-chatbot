@@ -1,6 +1,6 @@
 const { generateChatResponse } = require('./openaiService');
 const { getDialogueState } = require('./dialogueService');
-const { updatePractice } = require('../services/practiceService'); // 引入練習更新服務
+const { updateOwnedPractice: updatePractice } = require('./ownedPracticeService');
 
 /**
  * 分析對話並將結果保存到練習紀錄
