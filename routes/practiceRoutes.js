@@ -156,6 +156,7 @@ const { validatePracticeUpdate } = require('../middleware/validatePractice');
 // 更新練習
 router.patch('/practices/:id', validatePracticeUpdate, async (req, res) => {
   try {
+    const userId = req.user.id;
     const practiceId = req.params.id;
     
     // 驗證 practiceId 格式
@@ -197,7 +198,7 @@ router.patch('/practices/:id', validatePracticeUpdate, async (req, res) => {
     }
 
     // 進行更新
-    const updatedPractice = await updatePractice(practiceId, updates);
+    const updatedPractice = await updatePractice(userId, practiceId, updates);
 
     // 回傳更新結果
     res.json({
@@ -232,7 +233,10 @@ router.post('/:practiceId/feedback', authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: '回饋內容為必填' });
     }
 
-    const user = await User.findOne({ 'practices._id': practiceId });
+    const user = await User.findOne({
+      _id: req.user.id,
+      'practices._id': practiceId
+    });
     if (!user) {
       return res.status(404).json({ success: false, message: '找不到該練習記錄' });
     }
@@ -267,7 +271,10 @@ router.get('/:practiceId/feedback', authMiddleware, async (req, res) => {
     }
 
     // 查詢包含該練習的使用者
-    const user = await User.findOne({ 'practices._id': practiceId }).select('practices');
+    const user = await User.findOne({
+      _id: req.user.id,
+      'practices._id': practiceId
+    }).select('practices');
     if (!user) {
       return res.status(404).json({ success: false, message: '找不到該練習記錄' });
     }
