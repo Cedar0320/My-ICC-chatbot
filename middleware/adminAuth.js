@@ -19,7 +19,7 @@ const adminAuth = (req, res, next) => {
 
         // 驗證 token
         const decoded = jwt.verify(token, config.jwt.secret);
-        console.log('Admin 認證 - Decoded token:', { id: decoded.id, username: decoded.username, role: decoded.role });
+        console.log('Admin 認證成功');
 
         // 檢查是否為 admin
         if (decoded.role !== 'admin') {
