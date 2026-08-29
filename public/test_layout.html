@@ -1,3 +1,454 @@
+<!-- <!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 模擬練習 - Avatar 互動測試</title>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <style>
+        /* --- 1. 全局設定 --- */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            font-family: 'Microsoft JhengHei', 'Segoe UI', sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        /* --- 2. 主佈局容器 --- */
+        .interaction-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* --- 3. 左側：Avatar 區域 --- */
+        .avatar-section {
+            flex: 6; 
+            position: relative;
+            background: radial-gradient(circle at 50% 40%, #1a1a1a 0%, #000000 80%);
+            overflow: hidden;
+        }
+
+        .overlay-title {
+            position: absolute;
+            top: 30px;
+            left: 40px;
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            z-index: 10;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+            border-left: 5px solid #e93ae1;
+            padding-left: 15px;
+        }
+
+        #avatar-canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute; 
+            top: 0; 
+            left: 0;
+            z-index: 1; 
+        }
+
+        /* --- 4. 右側：互動區域 --- */
+        .chat-section {
+            flex: 4;
+            display: flex;
+            flex-direction: column;
+            background-color: #0a0a0a;
+            border-left: 1px solid #222;
+            padding: 20px;
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        .user-camera-wrapper {
+            width: 100%;
+            height: 220px;
+            background-color: #111;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            position: relative;
+            border: 1px solid #333;
+            flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        #user-webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .camera-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #ddd;
+            pointer-events: none;
+        }
+
+        #dialogueDisplay {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding-right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            scroll-behavior: smooth; 
+        }
+
+        /* --- 5. 對話泡泡樣式 --- */
+        .message {
+            display: flex;
+            flex-direction: column;
+            max-width: 90%;
+            margin-bottom: 5px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.家長, .message.parent { align-self: flex-start; }
+        .message.家長 .message-content {
+            background-color: #2d2d2d;
+            color: #e0e0e0;
+            border-radius: 12px 12px 12px 0;
+            padding: 12px 16px;
+            line-height: 1.5;
+        }
+        .message.家長 .message-header {
+            text-align: left;
+            margin-bottom: 4px;
+            font-size: 0.85em;
+            color: #888;
+        }
+
+        .message.老師, .message.teacher { align-self: flex-end; }
+        .message.老師 .message-content {
+            background-color: #e93ae1;
+            color: white;
+            border-radius: 12px 12px 0 12px;
+            padding: 12px 16px;
+            line-height: 1.5;
+            box-shadow: 0 2px 8px rgba(233, 58, 225, 0.3);
+        }
+        .message.老師 .message-header {
+            text-align: right;
+            margin-bottom: 4px;
+            font-size: 0.85em;
+            color: #bbb;
+        }
+
+        .message-time {
+            font-size: 0.75em;
+            color: #555;
+            margin-top: 4px;
+            padding: 0 2px;
+        }
+        .message.老師 .message-time { text-align: right; }
+        .message.家長 .message-time { text-align: left; }
+
+        #dialogueDisplay::-webkit-scrollbar { width: 6px; }
+        #dialogueDisplay::-webkit-scrollbar-track { background: #111; }
+        #dialogueDisplay::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+        #dialogueDisplay::-webkit-scrollbar-thumb:hover { background: #555; }
+
+    </style>
+</head>
+<body>
+
+    <div class="interaction-container">
+        <div class="avatar-section">
+            <div class="overlay-title">練習進行中</div>
+            <div id="avatar-canvas-container"></div>
+        </div>
+
+        <div class="chat-section">
+            <div class="user-camera-wrapper">
+                <video id="user-webcam" autoplay playsinline muted></video>
+                <div class="camera-label">使用者鏡頭</div>
+            </div>
+
+            <div id="dialogueDisplay">
+                <div class="message 家長">
+                    <div class="message-header">👤 家長</div>
+                    <div class="message-content">老師您好，系統已就緒。請確認 test.wav 是否已放在資料夾中。</div>
+                    <div class="message-time">10:00</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="test-audio-btn" style="padding: 12px 20px; background: #e93ae1; color: white; border: none; cursor: pointer; border-radius: 8px; font-weight: bold; transition: 0.2s;">
+                    ▶️ 播放 test.wav 並動嘴巴
+                </button>
+            </div>
+            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                * 提示：按 F12 打開 Console 可測試表情控制，例如輸入 window.setEmotion('smile', 1)
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // 1. 初始化 Webcam
+        async function initWebcam() {
+            try {
+                const video = document.getElementById('user-webcam');
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+            } catch (err) {
+                console.warn("無法存取攝影機", err);
+            }
+        }
+        initWebcam();
+
+        // 2. Three.js 場景設定
+        const container = document.getElementById('avatar-canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = null; 
+
+        // 相機設定 (特寫上半身)
+        const camera = new THREE.PerspectiveCamera(25, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(0, 0.1, 1.5); 
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
+        container.appendChild(renderer.domElement);
+
+        // 燈光設定
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(-1, 2, 3);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+        const fillLight = new THREE.DirectionalLight(0xffaaee, 0.5);
+        fillLight.position.set(1, 0, 2);
+        scene.add(fillLight);
+        const rimLight = new THREE.SpotLight(0x4455ff, 3);
+        rimLight.position.set(0, 2, -2);
+        rimLight.lookAt(0, 1.5, 0);
+        scene.add(rimLight);
+
+        // 3. 載入模型與動畫邏輯
+        const loader = new GLTFLoader();
+        let headMesh;
+        let teethMesh; 
+        
+        // 使用 Ready Player Me 官方模型 (已包含 ARKit 表情)
+        const MODEL_URL = 'https://models.readyplayer.me/6970de41655a82b6fadcbd87.glb?morphTargets=ARKit,Oculus%20Visemes';
+
+        loader.load(MODEL_URL, (gltf) => {
+            const model = gltf.scene;
+            model.position.y = -1.65; // 調整位置
+            scene.add(model);
+
+            // 尋找頭部 Mesh
+            model.traverse((child) => {
+                if (child.isMesh && child.morphTargetDictionary) {
+                    if (child.morphTargetDictionary['jawOpen'] !== undefined) {
+                        headMesh = child;
+                    }
+                    if (child.name.includes('Teeth')) {
+                         teethMesh = child;
+                    }
+                }
+            });
+            console.log("Avatar 載入完成");
+            
+            // 模型載入完成後，啟動眨眼
+            startBlinking();
+
+        }, undefined, (error) => {
+            console.error('模型載入失敗:', error);
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        // 4. [新功能] 自動眨眼邏輯
+        function startBlinking() {
+            const blink = () => {
+                if (headMesh && headMesh.morphTargetDictionary) {
+                    const leftEyeIndex = headMesh.morphTargetDictionary['eyeBlinkLeft'];
+                    const rightEyeIndex = headMesh.morphTargetDictionary['eyeBlinkRight'];
+
+                    if (leftEyeIndex !== undefined && rightEyeIndex !== undefined) {
+                        // 閉眼
+                        headMesh.morphTargetInfluences[leftEyeIndex] = 1;
+                        headMesh.morphTargetInfluences[rightEyeIndex] = 1;
+                        // 0.15秒後張開
+                        setTimeout(() => {
+                            headMesh.morphTargetInfluences[leftEyeIndex] = 0;
+                            headMesh.morphTargetInfluences[rightEyeIndex] = 0;
+                        }, 150);
+                    }
+                }
+                // 隨機 2~5 秒後再次眨眼
+                setTimeout(blink, Math.random() * 3000 + 2000);
+            };
+            setTimeout(blink, 2000);
+        }
+
+        // 5. [新功能] 表情控制工具 (Global)
+        window.setEmotion = function(emotionName, value) {
+            if (!headMesh) return console.warn("Avatar 尚未載入完成");
+
+            // 表情對照表
+            const map = {
+                'smile': 'mouthSmile',
+                'sad': 'mouthFrownLeft',
+                'angry': 'browDownLeft',
+                'open': 'jawOpen'
+            };
+            const key = map[emotionName] || emotionName;
+
+            const apply = (mesh, targetKey, val) => {
+                if(mesh && mesh.morphTargetDictionary && mesh.morphTargetDictionary[targetKey] !== undefined) {
+                    const idx = mesh.morphTargetDictionary[targetKey];
+                    mesh.morphTargetInfluences[idx] = val;
+                }
+            };
+
+            // 處理微笑 (左右對稱)
+            if (key === 'mouthSmile') {
+                apply(headMesh, 'mouthSmileLeft', value);
+                apply(headMesh, 'mouthSmileRight', value);
+            } else {
+                apply(headMesh, key, value);
+            }
+            console.log(`設定表情: ${key} = ${value}`);
+        };
+
+        // 6. Audio Sync 核心邏輯
+        let audioContext, analyser, dataArray;
+        let currentVolume = 0;
+        let isSpeaking = false;
+
+        window.syncAvatarWithAudio = function(audioElement) {
+            if (!audioElement) return;
+
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 64; 
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+            }
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            if (!audioElement._isConnected) {
+                try {
+                    const source = audioContext.createMediaElementSource(audioElement);
+                    source.connect(analyser);
+                    analyser.connect(audioContext.destination);
+                    audioElement._isConnected = true;
+                } catch (e) {
+                    console.warn("Audio 連接重複忽略");
+                }
+            }
+
+            audioElement.onplay = () => { isSpeaking = true; };
+            audioElement.onpause = () => { isSpeaking = false; currentVolume = 0; };
+            audioElement.onended = () => { isSpeaking = false; currentVolume = 0; };
+        };
+
+        // 7. Render Loop (動畫迴圈)
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 音量偵測
+            if (isSpeaking && analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                let average = sum / dataArray.length;
+                let targetVolume = Math.min(1, (average / 25)); // 除以25讓嘴巴動大一點
+                currentVolume = THREE.MathUtils.lerp(currentVolume, targetVolume, 0.3);
+            } else {
+                currentVolume = THREE.MathUtils.lerp(currentVolume, 0, 0.2);
+            }
+
+            // 更新嘴巴 (jawOpen)
+            if (headMesh && headMesh.morphTargetDictionary) {
+                const jawIndex = headMesh.morphTargetDictionary['jawOpen'];
+                if (jawIndex !== undefined) headMesh.morphTargetInfluences[jawIndex] = currentVolume;
+            }
+            if (teethMesh && teethMesh.morphTargetDictionary) {
+                const jawIndex = teethMesh.morphTargetDictionary['jawOpen'];
+                if (jawIndex !== undefined) teethMesh.morphTargetInfluences[jawIndex] = currentVolume;
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // ==========================================
+        // 8. [整合] 按鈕功能：播放 test.wav
+        // ==========================================
+        document.getElementById('test-audio-btn').addEventListener('click', () => {
+            console.log("嘗試播放 test.wav...");
+            
+            // 讀取同目錄下的 test.wav
+            const audio = new Audio('test.wav');
+            
+            // 關鍵：允許跨域，雖然是本地檔案，但設了比較保險
+            audio.crossOrigin = "anonymous";
+            
+            // 連接嘴巴
+            if (window.syncAvatarWithAudio) {
+                window.syncAvatarWithAudio(audio);
+            }
+
+            // 播放
+            audio.play().then(() => {
+                console.log("正在播放音訊...");
+            }).catch(e => {
+                console.error("播放失敗:", e);
+                alert("播放失敗！請確認：\n1. 資料夾內是否有 test.wav\n2. 是否使用 Live Server 開啟網頁 (不要直接點開 html 檔)");
+            });
+        });
+
+    </script>
+</body>
+</html> -->
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
