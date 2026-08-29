@@ -1,9 +1,8 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const config = require('../config/config');
 
-const JWT_SECRET = config.jwt.secret;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 class AuthService {
   // 註冊新使用者
