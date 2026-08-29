@@ -11,6 +11,18 @@ const {
 } = require('../services/practiceService');
 const { updateOwnedPractice: updatePractice } = require('../services/ownedPracticeService');
 
+// 獲取所有練習
+// router.get('/practices', async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+    
+//     const practices = await getPractices(userId);
+//     res.json({ success: true, practices });
+//   } catch (error) {
+//     res.status(500).json({ success: false, message: error.message });
+//   }
+// });
+
 //301更新
 router.get('/practices', async (req, res) => {
   try {

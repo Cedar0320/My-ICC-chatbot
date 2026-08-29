@@ -35,7 +35,7 @@ router.post('/login', async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        console.log('Admin 登入嘗試');
+        console.log('Admin 登入嘗試:', username);
 
         // 驗證必要欄位
         if (!username || !password) {
@@ -47,7 +47,7 @@ router.post('/login', async (req, res) => {
 
         // 查找用戶
         const user = await User.findOne({ username });
-        console.log('Admin 帳號查詢完成:', Boolean(user));
+        console.log('找到使用者:', user ? `${user.username} (role: ${user.role})` : '無');
 
         if (!user) {
             console.log('❌ 使用者不存在');
@@ -88,7 +88,7 @@ router.post('/login', async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        console.log('✅ Admin 登入成功');
+        console.log('✅ Admin 登入成功:', username);
 
         res.json({
             success: true,
@@ -390,7 +390,7 @@ router.delete('/users/:userId', adminAuth, async (req, res) => {
 
         await User.findByIdAndDelete(userId);
 
-        console.log('✅ 使用者已刪除');
+        console.log('✅ 使用者已刪除:', user.username);
 
         res.json({
             success: true,
