@@ -391,14 +391,14 @@ function calculateNonverbalSummary(history) {
  */
 async function updatePractice(practiceId, updates) {
   try {
-      console.log('Updating practice with:', { practiceId, updates });
+      console.log('Updating practice');
 
       const updatesObj = typeof updates === 'string' ? { content: updates } : updates;
 
       const user = await User.findOne({ 'practices._id': practiceId });
 
       if (!user) {
-          console.error('找不到練習:', practiceId);
+          console.error('找不到練習');
           throw new Error('練習不存在');
       }
 
@@ -455,7 +455,6 @@ async function updatePractice(practiceId, updates) {
           }
       }
 
-      console.log('練習更新前的內容:', practice);
       await user.save();
 
       console.log('練習更新成功');
@@ -553,13 +552,6 @@ async function createPractice(userId, newPractice) {
     if (!user) {
       throw new Error('使用者不存在');
     }
-
-    // 自動清除超過 24 小時且沒有 analysis 的練習（殭屍資料預防）
-    // 有 analysis 的練習表示已完成，不會被刪除
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    user.practices = user.practices.filter(p => 
-      !(p.createdAt < oneDayAgo && !p.analysis)
-    );
 
     const practice = {
       _id: new mongoose.Types.ObjectId(),

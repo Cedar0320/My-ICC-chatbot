@@ -713,7 +713,7 @@ router.post('/start-dialogue', async (req, res) => {
 
         const parsedResponse = parseInitialResponse(response);
         if (!parsedResponse) {
-            console.error('AI 回應解析失敗，原始回應:', response);
+            console.error('AI 回應解析失敗');
             return res.status(500).json({
                 success: false,
                 message: 'AI 回應解析失敗',
@@ -801,7 +801,7 @@ function parseInitialResponse(response) {
         return { scenario };
     } catch (error) {
         console.error('解析 AI 回應時發生錯誤:', error);
-        console.error('原始回應內容:', response);
+        console.error('AI 初始回應缺少必要欄位');
         throw new Error(`解析 AI 回應失敗: ${error.message}`);
     }
 }
@@ -814,7 +814,11 @@ router.post('/continue-dialogue', async (req, res) => {
     try {
         const { userResponse, practiceId, challengeTimeOver, nonverbalData, characterVoice } = req.body;
         const userId = req.user.id;
-        console.log("收到請求：", req.body);
+        console.log('收到繼續對話請求:', {
+            hasUserResponse: Boolean(userResponse),
+            challengeTimeOver: Boolean(challengeTimeOver),
+            hasNonverbalData: Boolean(nonverbalData)
+        });
 
         // 如果有非語言數據，記錄到日誌
         if (nonverbalData) {

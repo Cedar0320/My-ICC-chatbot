@@ -56,9 +56,8 @@ const uploadToS3 = async (file, fileName) => {
 router.post('/transcribe', upload.single('audio'), async (req, res) => {
   try {
     console.log('收到音頻上傳請求:', {
-      headers: req.headers,
-      body: req.body,
-      file: req.file ? '存在' : '不存在'
+      hasFile: Boolean(req.file),
+      fileSize: req.file?.size || 0
     });
 
     // 驗證請求
@@ -86,11 +85,11 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
 
     // 上傳到 S3
     const s3Result = await uploadToS3(req.file, fileName);
-    console.log('S3 上傳成功:', s3Result.Location);
+    console.log('S3 上傳成功');
 
     // 轉錄音頻（已包含簡繁轉換）
     const transcription = await transcribeAudio(s3Result.Location);
-    console.log('轉錄完成:', transcription);
+    console.log('轉錄完成');
 
     // 準備錄音記錄
     const newRecording = {

@@ -22,8 +22,9 @@ const s3 = new AWS.S3({
 });
 
 async function transcribeAudio(fileUrl) {
+  let tempFilePath;
   try {
-    console.log('開始下載音頻文件...', fileUrl);
+    console.log('開始下載音頻文件');
     
     // 從 URL 獲取 bucket 和 key
     const urlParts = new URL(fileUrl);
@@ -37,7 +38,7 @@ async function transcribeAudio(fileUrl) {
     }
 
     // 創建臨時文件路徑
-    const tempFilePath = path.join(tempDir, `temp-${Date.now()}.wav`);
+    tempFilePath = path.join(tempDir, `temp-${Date.now()}.wav`);
 
     // 使用 S3 SDK 下載文件
     const fileData = await s3.getObject({
@@ -60,27 +61,28 @@ async function transcribeAudio(fileUrl) {
       language: "zh"
     });
 
-    // 刪除臨時文件
-    fs.unlinkSync(tempFilePath);
-
     // 將轉錄文字轉換為繁體中文
     const traditionalText = converter(transcription.text);
-    console.log('原始轉錄文字:', transcription.text);
-    console.log('轉換後繁體文字:', traditionalText);
 
     return traditionalText;
 
   } catch (error) {
     console.error('音頻轉錄失敗:', error);
     throw error;
+  } finally {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try {
+        fs.unlinkSync(tempFilePath);
+      } catch (cleanupError) {
+        console.error('清理轉錄暫存檔失敗:', cleanupError.message);
+      }
+    }
   }
 }
 
 
 async function generateChatResponse(messages) {
   try {
-      console.log('Sending request to OpenAI:', messages);
-      
       const chatCompletion = await openai.chat.completions.create({
           messages,
           model: "gpt-4o-mini", 
@@ -93,7 +95,6 @@ async function generateChatResponse(messages) {
       }
       
       const response = chatCompletion.choices[0].message.content.trim();
-      console.log('OpenAI response:', response);
       return response;
       
   } catch (error) {
@@ -105,6 +106,7 @@ async function generateChatResponse(messages) {
 
 
 async function generateSpeech(text, voice = 'shimmer') {
+  let outputPath;
   try {
     // 檢查輸入文字
     if (!text || typeof text !== 'string') {
@@ -124,7 +126,7 @@ async function generateSpeech(text, voice = 'shimmer') {
 
     // 生成唯一的檔案名稱
     const timestamp = Date.now();
-    const outputPath = path.join(tempDir, `speech-${timestamp}.mp3`);
+    outputPath = path.join(tempDir, `speech-${timestamp}.mp3`);
 
     // 檢查檔案是否已存在
     if (fs.existsSync(outputPath)) {
@@ -174,7 +176,7 @@ async function generateSpeech(text, voice = 'shimmer') {
     });
 
   } catch (error) {
-    console.error('語音合成失敗:', error.response?.data || error.message);
+    console.error('語音合成失敗:', error.message);
     // 清理可能的部分檔案
     if (outputPath && fs.existsSync(outputPath)) {
       try {

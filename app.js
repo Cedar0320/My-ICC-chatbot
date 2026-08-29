@@ -326,35 +326,21 @@ const authMiddleware = require('./middleware/auth');
 const authRoutes = require('./routes/authRoutes');
 const audioRoutes = require('./routes/audioRoutes');
 const AWS = require('aws-sdk');
+const { cleanupOldTempAudioFiles } = require('./utils/fileUtils');
 //const ttsRoutes = require('./routes/ttsRoutes');
 
-const User = require('./models/User');
-
-// ─── 定期清理殭屍練習（每天執行一次）─────────────────────────────────────────
-async function cleanupPendingPractices() {
+async function cleanupTempAudio() {
   try {
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const users = await User.find({ 'practices.0': { $exists: true } }, '_id practices');
-    let totalDeleted = 0;
-
-    for (const user of users) {
-      const before = user.practices.length;
-      // 只刪除超過 24 小時且沒有 analysis 的練習（有 analysis 表示已完成）
-      user.practices = user.practices.filter(p => 
-        !(p.createdAt < oneDayAgo && !p.analysis)
-      );
-      const deleted = before - user.practices.length;
-      if (deleted > 0) {
-        await user.save();
-        totalDeleted += deleted;
-      }
-    }
-
-    if (totalDeleted > 0) {
-      console.log(`[定期清理] 已從 DB 刪除 ${totalDeleted} 筆超過 24 小時的 pending 練習`);
+    const tempDir = path.join(__dirname, 'temp');
+    const deletedCount = await cleanupOldTempAudioFiles(
+      tempDir,
+      config.tempAudioConfig.maxAge
+    );
+    if (deletedCount > 0) {
+      console.log(`[暫存清理] 已刪除 ${deletedCount} 個過期語音暫存檔`);
     }
   } catch (error) {
-    console.error('[定期清理] 清理殭屍練習時發生錯誤:', error);
+    console.error('[暫存清理] 清理語音暫存檔時發生錯誤:', error.message);
   }
 }
 
@@ -591,9 +577,6 @@ async function startServer() {
           throw new Error('資料庫連接失敗');
         }
 
-        // DB 連線成功後啟動定期清理（每 24 小時執行一次）
-        cleanupPendingPractices(); // 啟動時先執行一次
-        setInterval(cleanupPendingPractices, 24 * 60 * 60 * 1000);
       } catch (error) {
         retries--;
         if (retries === 0) {
@@ -605,6 +588,14 @@ async function startServer() {
     }
 
     const port = config.port || 3000;
+
+    // TTS 音檔僅供短期播放，啟動時及固定週期清理；不碰 MongoDB 或 S3 錄音。
+    await cleanupTempAudio();
+    const tempCleanupTimer = setInterval(
+      cleanupTempAudio,
+      config.tempAudioConfig.cleanupInterval
+    );
+    tempCleanupTimer.unref();
     
     // 儲存伺服器實例以便優雅關閉
     const server = app.listen(port, () => {
