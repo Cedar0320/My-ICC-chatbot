@@ -22,7 +22,7 @@ const { updateOwnedPractice: updatePractice } = require('./ownedPracticeService'
  */
 async function handleDialogueSubmission(userId, transcription, practiceId) {
   try {
-    console.log('Handling dialogue submission');
+    console.log('Handling dialogue submission for practice:', practiceId); // 調試用
 
     // 獲取當前對話狀態
     const dialogueState = getDialogueState(userId, practiceId);
@@ -103,7 +103,7 @@ async function handleDialogueSubmission(userId, transcription, practiceId) {
       }))
     ];
 
-    console.log('Preparing AI response');
+    console.log('Preparing AI response with messages:', messages); // 調試用
 
     // 獲取 AI 回應
     const response = await generateChatResponse(messages);
