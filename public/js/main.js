@@ -914,36 +914,6 @@ function displayPracticeDetails(practice, nonverbalData) {
         } else {
             analysisContent.textContent = '尚無分析結果';
         }
-    // if (practice.analysis) {
-    //     const paragraphs = practice.analysis.split(/(?<=。)\s/);
-    //     paragraphs.forEach(paragraph => {
-    //         const cleanedParagraph = paragraph.replace(/[#*]/g, '').replace(/-/g, '').trim();
-    //         const paragraphElement = document.createElement('p');
-            
-    //         let content = cleanedParagraph
-    //             .replace(/整體回饋：/g, '<strong>整體回饋：</strong>')
-    //             .replace(/具體描述對方行為：/g, '<strong>具體描述對方行為：</strong>');
-            
-    //         content = content.replace(/(\d+)/g, '<br>$1');
-            
-    //         const subtitleMatch = content.match(/^(.*?：)/);
-    //         if (subtitleMatch) {
-    //             const subtitle = subtitleMatch[1];
-    //             content = content.replace(subtitle, '').trim();
-    //             content = content.replace(/\)(.*?)/g, ')<br><strong>$1</strong>');
-    //             content = content.replace(/(\d+\s*.*?):/g, '<strong>$1</strong>:');
-    //             paragraphElement.innerHTML = `<strong>${subtitle}</strong>${content}`;
-    //         } else {
-    //             content = content.replace(/\)(.*?)/g, ')<br><strong>$1</strong>');
-    //             content = content.replace(/(\d+\s*.*?):/g, '<strong>$1</strong>:');
-    //             paragraphElement.innerHTML = content;
-    //         }
-    //         analysisContent.appendChild(paragraphElement);
-    //     });
-    // } else {
-    //     analysisContent.textContent = '尚無分析結果';
-    // }
-
     // 顯示非語言分析
     const nonverbalDisplayPanel = document.getElementById('nonverbalDataDisplay');
     const nonverbalDataContent = document.getElementById('nonverbalDataContent');
