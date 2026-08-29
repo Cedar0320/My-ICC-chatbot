@@ -1,6 +1,66 @@
 const User = require('../models/User');
 const mongoose = require('mongoose');
 
+const INCOMPLETE_PRACTICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 刪除超過指定時間且尚未產生分析結果的練習。
+ * 使用 $pull 精準移除練習子文件，避免保存整份 User 文件時覆蓋其他同時寫入的資料。
+ * @param {Object} options 清理選項
+ * @param {String|ObjectId} [options.userId] 只清理指定使用者；未提供時清理全部使用者
+ * @param {Date} [options.now] 判斷時間，主要供測試使用
+ * @param {Number} [options.maxAgeMs] 未完成練習的保留時間
+ * @returns {Number} 實際清理的練習數量
+ */
+async function cleanupOldIncompletePractices({
+  userId,
+  now = new Date(),
+  maxAgeMs = INCOMPLETE_PRACTICE_MAX_AGE_MS
+} = {}) {
+  const cutoff = new Date(now.getTime() - maxAgeMs);
+  const query = { 'practices.0': { $exists: true } };
+
+  if (userId) {
+    query._id = userId;
+  }
+
+  const users = await User.find(query)
+    .select('_id practices._id practices.createdAt practices.analysis')
+    .lean();
+
+  let totalDeleted = 0;
+
+  for (const user of users) {
+    const expiredPracticeIds = (user.practices || [])
+      .filter(practice => {
+        const createdAt = new Date(practice.createdAt);
+        const isIncomplete = typeof practice.analysis !== 'string'
+          || practice.analysis.trim() === '';
+
+        return !Number.isNaN(createdAt.getTime())
+          && createdAt < cutoff
+          && isIncomplete;
+      })
+      .map(practice => practice._id)
+      .filter(Boolean);
+
+    if (expiredPracticeIds.length === 0) {
+      continue;
+    }
+
+    const result = await User.updateOne(
+      { _id: user._id },
+      { $pull: { practices: { _id: { $in: expiredPracticeIds } } } }
+    );
+
+    if (result.modifiedCount > 0) {
+      totalDeleted += expiredPracticeIds.length;
+    }
+  }
+
+  return totalDeleted;
+}
+
 // ==================== 非語言數據統計工具函數 ====================
 
 /**
@@ -179,6 +239,9 @@ async function getPracticeDetails(userId, practiceId) {
  */
 async function createPractice(userId, newPractice) {
   try {
+    // 建立新練習前，先清除該使用者超過 24 小時且仍未完成的舊練習。
+    await cleanupOldIncompletePractices({ userId });
+
     const user = await User.findById(userId);
     if (!user) {
       throw new Error('使用者不存在');
@@ -274,5 +337,7 @@ module.exports = {
   createPractice,
   deletePractice,
   getPracticeWithRetries,
-  calculateNonverbalSummary
+  calculateNonverbalSummary,
+  cleanupOldIncompletePractices,
+  INCOMPLETE_PRACTICE_MAX_AGE_MS
 };

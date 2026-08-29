@@ -11,6 +11,10 @@ const authRoutes = require('./routes/authRoutes');
 const audioRoutes = require('./routes/audioRoutes');
 const AWS = require('aws-sdk');
 const { cleanupOldTempAudioFiles } = require('./utils/fileUtils');
+const {
+  cleanupOldIncompletePractices,
+  INCOMPLETE_PRACTICE_MAX_AGE_MS
+} = require('./services/practiceService');
 
 async function cleanupTempAudio() {
   try {
@@ -24,6 +28,17 @@ async function cleanupTempAudio() {
     }
   } catch (error) {
     console.error('[暫存清理] 清理語音暫存檔時發生錯誤:', error.message);
+  }
+}
+
+async function cleanupPendingPractices() {
+  try {
+    const deletedCount = await cleanupOldIncompletePractices();
+    if (deletedCount > 0) {
+      console.log(`[定期清理] 已刪除 ${deletedCount} 筆超過 24 小時的未完成練習`);
+    }
+  } catch (error) {
+    console.error('[定期清理] 清理未完成練習時發生錯誤:', error.message);
   }
 }
 
@@ -270,6 +285,14 @@ async function startServer() {
     }
 
     const port = config.port || 3000;
+
+    // 啟動時清理一次，之後每 24 小時清理超過 24 小時且沒有 analysis 的練習。
+    await cleanupPendingPractices();
+    const practiceCleanupTimer = setInterval(
+      cleanupPendingPractices,
+      INCOMPLETE_PRACTICE_MAX_AGE_MS
+    );
+    practiceCleanupTimer.unref();
 
     // TTS 音檔僅供短期播放，啟動時及固定週期清理；不碰 MongoDB 或 S3 錄音。
     await cleanupTempAudio();
