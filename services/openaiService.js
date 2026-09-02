@@ -187,10 +187,43 @@ async function generateSpeech(text, voice = 'shimmer') {
   }
 }
 
+// Voice 2.0：直接把 OpenAI TTS 的回應串流交給路由，避免先寫完整 MP3 才播放。
+async function generateSpeechStream(text, voice = 'nova') {
+  if (!text || typeof text !== 'string') {
+    throw new Error('無效的文字輸入');
+  }
+
+  const apiKey = config.openaiApiKey;
+  if (!apiKey) {
+    throw new Error('OpenAI API 金鑰未設定');
+  }
+
+  const response = await axios({
+    method: 'POST',
+    url: 'https://api.openai.com/v1/audio/speech',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    responseType: 'stream',
+    data: {
+      // 保留原本的 tts-1 與角色 voice，先只改傳輸方式，降低 Voice 2.0 對既有研究流程的影響。
+      model: 'tts-1',
+      input: text,
+      voice: voice,
+      response_format: 'mp3',
+      speed: 1.15
+    }
+  });
+
+  return response.data;
+}
+
 
 module.exports = {
   transcribeAudio,
   generateSpeech,
+  generateSpeechStream,
   generateChatResponse: async (messages) => {
     try {
       const completion = await openai.chat.completions.create({

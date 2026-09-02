@@ -469,6 +469,10 @@ app.use('/api/audio', authMiddleware, (req, res, next) => {
   audioRoutes(req, res, next);
 });
 
+// Voice 2.0：OpenAI Realtime transcription WebRTC session
+const realtimeRoutes = require('./routes/realtimeRoutes');
+app.use('/api/realtime', authMiddleware, realtimeRoutes);
+
 // 對話路由 - 增加特定的錯誤處理和超時控制
 app.use('/api/dialogue', authMiddleware, (req, res, next) => {
   // 為對話相關請求增加特定的超時處理

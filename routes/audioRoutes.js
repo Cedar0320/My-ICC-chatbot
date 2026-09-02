@@ -31,6 +31,22 @@ const upload = multer({
   }
 });
 
+// Voice 2.0 的研究錄音保存：瀏覽器常見格式都可接受，
+// 只負責保存，不再把 S3 當成轉錄的中繼站。
+const voice2Upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = new Set([
+      'audio/webm', 'audio/ogg', 'audio/wav', 'audio/x-wav',
+      'audio/mp4', 'audio/mpeg'
+    ]);
+    const baseMime = (file.mimetype || '').split(';')[0].trim().toLowerCase();
+    if (allowed.has(baseMime)) return cb(null, true);
+    cb(new Error('不支援的錄音格式'));
+  }
+});
+
 // 輔助函數：檢查請求參數
 const validateRequest = (req) => {
   const errors = [];
@@ -118,6 +134,50 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
       success: false,
       error: converter(error.message || '音頻處理失敗')
     });
+  }
+});
+
+// Voice 2.0：只保存已經由 Realtime 轉錄完成的使用者語音。
+router.post('/save-recording', voice2Upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) throw new Error('未接收到音頻文件');
+    if (!req.body.practiceId) throw new Error('練習 ID 缺失');
+
+    const user = await User.findOne({
+      _id: req.user.id,
+      'practices._id': req.body.practiceId
+    });
+    if (!user) throw new Error('練習記錄未找到或無權存取');
+
+    const practice = user.practices.id(req.body.practiceId);
+    if (!practice) throw new Error('練習記錄未找到或無權存取');
+
+    const extensionMap = {
+      'audio/webm': 'webm',
+      'audio/ogg': 'ogg',
+      'audio/wav': 'wav',
+      'audio/x-wav': 'wav',
+      'audio/mp4': 'm4a',
+      'audio/mpeg': 'mp3'
+    };
+    const baseMime = (req.file.mimetype || '').split(';')[0].trim().toLowerCase();
+    const ext = extensionMap[baseMime] || 'webm';
+    const fileName = `recording-${Date.now()}.${ext}`;
+    const s3Result = await uploadToS3(req.file, fileName);
+
+    const newRecording = {
+      timestamp: Date.now(),
+      path: s3Result.Location,
+      transcription: typeof req.body.transcription === 'string' ? req.body.transcription.trim() : ''
+    };
+
+    practice.recordings.push(newRecording);
+    await user.save();
+
+    res.json({ success: true, recording: newRecording });
+  } catch (error) {
+    console.error('Voice 2.0 錄音保存失敗:', error.message);
+    res.status(500).json({ success: false, error: error.message || '錄音保存失敗' });
   }
 });
 

@@ -75,6 +75,44 @@ const maxDialogues = 12;
 let currentAccumulatedText = '';
 let currentAudioPlayer = null; // 追蹤當前播放的音頻
 
+// ==========================================
+// CommAI Voice 2.0（Realtime transcription）
+// ==========================================
+const VOICE2_REALTIME_ENABLED = true;
+let realtimePeerConnection = null;
+let realtimeDataChannel = null;
+let realtimeMicStream = null;
+let realtimeSessionPracticeId = null;
+let realtimeStartingPromise = null;
+let realtimeVoiceTurnBusy = false;
+let realtimeProcessedItemIds = new Set();
+let realtimeTranscriptByItem = new Map();
+let realtimeFallbackActive = false;
+let voice2SegmentRecorder = null;
+let voice2SegmentChunks = [];
+let voice2CompletedSegmentBlobs = [];
+let voice2SegmentBlobWaiters = [];
+let voice2DiscardNextSegment = false;
+let voice2TtsObjectUrls = [];
+
+// gpt-live-transcribe 本身不支援 server-side turn_detection，
+// 因此 Voice 2.0 v3 由瀏覽器本地偵測「開始說話 / 停頓」，
+// 再透過 Realtime data channel 送 input_audio_buffer.commit。
+const VOICE2_LOCAL_VAD_SILENCE_MS = 1200;
+const VOICE2_LOCAL_VAD_MIN_SPEECH_MS = 180;
+let voice2AudioContext = null;
+let voice2VadSource = null;
+let voice2VadAnalyser = null;
+let voice2VadFrameId = null;
+let voice2VadSamples = null;
+let voice2LocalSpeechActive = false;
+let voice2LocalSpeechStartedAt = 0;
+let voice2LastVoiceAt = 0;
+let voice2AboveThresholdSince = 0;
+let voice2NoiseFloor = 0.006;
+let voice2CommitPending = false;
+let voice2CommitTimeout = null;
+
 // DOM 元素快取
 const techniqueSelect = document.getElementById('techniqueSelect');
 const startPracticeBtn = document.getElementById('startPracticeBtn');
@@ -402,6 +440,7 @@ if (enableNonverbalDetection) {
             textInputControls.style.display = 'none';
 
             recordStatus.textContent = '已啟用非語言偵測 - 將使用語音輸入模式';
+            if (currentPracticeId && isVoice2DialogueActive()) startRealtimeVoiceSession(currentPracticeId);
         } else {
             if (textInputLabel) textInputLabel.style.display = 'inline-block';
             recordStatus.textContent = '';
@@ -410,12 +449,15 @@ if (enableNonverbalDetection) {
 }
 
 inputMethodRadios.forEach(radio => {
-    radio.addEventListener('change', (e) => {
+    radio.addEventListener('change', async (e) => {
         if (e.target.value === 'voice') {
             voiceInputControls.style.display = 'block';
             textInputControls.style.display = 'none';
             if (isRecording) {
                 stopRecordBtn.click();
+            }
+            if (currentPracticeId && isVoice2DialogueActive()) {
+                await startRealtimeVoiceSession(currentPracticeId);
             }
         } else if (e.target.value === 'text') {
             if (isNonverbalEnabled) {
@@ -430,6 +472,8 @@ inputMethodRadios.forEach(radio => {
             if (isRecording) {
                 stopRecordBtn.click();
             }
+            await stopRealtimeVoiceSession();
+            setVoice2Controls(false);
         }
     });
 });
@@ -1297,9 +1341,620 @@ async function retryPractice(practiceId, scenario) {
 // 對話與錄音邏輯
 // ==========================================
 
+function isVoiceInputSelected() {
+    const selected = document.querySelector('input[name="inputMethod"]:checked');
+    return selected && selected.value === 'voice';
+}
+
+function isVoice2DialogueActive() {
+    const dialogueWithAvatar = document.getElementById('dialogueWithAvatar');
+    return Boolean(dialogueWithAvatar && window.getComputedStyle(dialogueWithAvatar).display !== 'none');
+}
+
+function setVoice2Controls(active) {
+    if (!voiceInputControls) return;
+    const recordingLimitInfo = voiceInputControls.querySelector('.recording-limit-info');
+
+    if (active) {
+        if (startRecordBtn) startRecordBtn.style.display = 'none';
+        if (stopRecordBtn) stopRecordBtn.style.display = 'none';
+        if (recordingLimitInfo) recordingLimitInfo.style.display = 'none';
+        stopRecordingTimer();
+    } else {
+        if (startRecordBtn) startRecordBtn.style.display = '';
+        if (stopRecordBtn) stopRecordBtn.style.display = '';
+        if (recordingLimitInfo) recordingLimitInfo.style.display = '';
+    }
+}
+
+function setRealtimeMicEnabled(enabled) {
+    if (!realtimeMicStream) return;
+    realtimeMicStream.getAudioTracks().forEach(track => {
+        track.enabled = Boolean(enabled);
+    });
+}
+
+function resetVoice2LocalVadTurn() {
+    voice2LocalSpeechActive = false;
+    voice2LocalSpeechStartedAt = 0;
+    voice2LastVoiceAt = 0;
+    voice2AboveThresholdSince = 0;
+}
+
+function clearVoice2CommitTimeout() {
+    if (voice2CommitTimeout) {
+        clearTimeout(voice2CommitTimeout);
+        voice2CommitTimeout = null;
+    }
+}
+
+async function commitVoice2AudioTurn() {
+    if (
+        voice2CommitPending ||
+        realtimeVoiceTurnBusy ||
+        realtimeFallbackActive ||
+        !realtimeDataChannel ||
+        realtimeDataChannel.readyState !== 'open'
+    ) return;
+
+    const speechDuration = performance.now() - voice2LocalSpeechStartedAt;
+    if (!voice2LocalSpeechActive || speechDuration < VOICE2_LOCAL_VAD_MIN_SPEECH_MS) {
+        resetVoice2LocalVadTurn();
+        return;
+    }
+
+    voice2CommitPending = true;
+    setRealtimeMicEnabled(false);
+    recordStatus.textContent = '正在整理你的語音…';
+    finishVoice2SegmentRecording();
+
+    try {
+        realtimeDataChannel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+    } catch (error) {
+        voice2CommitPending = false;
+        await fallbackToManualVoice(new Error(`無法送出即時語音：${error.message}`));
+        return;
+    }
+
+    // 正常情況下 completion 很快會回來；若長時間完全沒有結果，
+    // 不讓使用者永久卡在「整理中」。
+    clearVoice2CommitTimeout();
+    voice2CommitTimeout = setTimeout(() => {
+        if (!voice2CommitPending || realtimeFallbackActive) return;
+        fallbackToManualVoice(new Error('即時轉錄等待逾時'));
+    }, 12000);
+}
+
+function stopVoice2LocalVad() {
+    if (voice2VadFrameId) {
+        cancelAnimationFrame(voice2VadFrameId);
+        voice2VadFrameId = null;
+    }
+    if (voice2VadSource) {
+        try { voice2VadSource.disconnect(); } catch (_) {}
+        voice2VadSource = null;
+    }
+    if (voice2VadAnalyser) {
+        try { voice2VadAnalyser.disconnect(); } catch (_) {}
+        voice2VadAnalyser = null;
+    }
+    if (voice2AudioContext) {
+        try { voice2AudioContext.close(); } catch (_) {}
+        voice2AudioContext = null;
+    }
+    voice2VadSamples = null;
+    voice2NoiseFloor = 0.006;
+    resetVoice2LocalVadTurn();
+}
+
+async function startVoice2LocalVad() {
+    stopVoice2LocalVad();
+    if (!realtimeMicStream) throw new Error('麥克風尚未就緒');
+
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) throw new Error('此瀏覽器不支援即時語音偵測');
+
+    voice2AudioContext = new AudioContextCtor();
+    if (voice2AudioContext.state === 'suspended') {
+        await voice2AudioContext.resume();
+    }
+
+    voice2VadSource = voice2AudioContext.createMediaStreamSource(realtimeMicStream);
+    voice2VadAnalyser = voice2AudioContext.createAnalyser();
+    voice2VadAnalyser.fftSize = 1024;
+    voice2VadAnalyser.smoothingTimeConstant = 0.2;
+    voice2VadSamples = new Uint8Array(voice2VadAnalyser.fftSize);
+    voice2VadSource.connect(voice2VadAnalyser);
+
+    const tick = () => {
+        if (!voice2VadAnalyser || !realtimeMicStream || realtimeFallbackActive) return;
+
+        const track = realtimeMicStream.getAudioTracks()[0];
+        const canListen = Boolean(
+            track && track.enabled && !realtimeVoiceTurnBusy && !voice2CommitPending
+        );
+
+        if (canListen) {
+            voice2VadAnalyser.getByteTimeDomainData(voice2VadSamples);
+            let sumSquares = 0;
+            for (let i = 0; i < voice2VadSamples.length; i++) {
+                const normalized = (voice2VadSamples[i] - 128) / 128;
+                sumSquares += normalized * normalized;
+            }
+            const rms = Math.sqrt(sumSquares / voice2VadSamples.length);
+            const now = performance.now();
+
+            // 尚未說話時持續估算背景噪音，讓不同麥克風不必使用完全固定門檻。
+            if (!voice2LocalSpeechActive && rms < 0.08) {
+                voice2NoiseFloor = (voice2NoiseFloor * 0.97) + (rms * 0.03);
+            }
+
+            const startThreshold = Math.max(0.018, Math.min(0.065, voice2NoiseFloor * 3.0));
+            const keepAliveThreshold = Math.max(0.012, Math.min(0.045, voice2NoiseFloor * 1.8));
+
+            if (!voice2LocalSpeechActive) {
+                if (rms >= startThreshold) {
+                    if (!voice2AboveThresholdSince) voice2AboveThresholdSince = now;
+                    if (now - voice2AboveThresholdSince >= 80) {
+                        voice2LocalSpeechActive = true;
+                        voice2LocalSpeechStartedAt = now;
+                        voice2LastVoiceAt = now;
+                        recordStatus.textContent = '🎙️ 正在聆聽…說完後系統會自動送出';
+                    }
+                } else {
+                    voice2AboveThresholdSince = 0;
+                }
+            } else {
+                if (rms >= keepAliveThreshold) {
+                    voice2LastVoiceAt = now;
+                } else if (
+                    now - voice2LastVoiceAt >= VOICE2_LOCAL_VAD_SILENCE_MS &&
+                    now - voice2LocalSpeechStartedAt >= VOICE2_LOCAL_VAD_MIN_SPEECH_MS
+                ) {
+                    commitVoice2AudioTurn();
+                }
+            }
+        }
+
+        voice2VadFrameId = requestAnimationFrame(tick);
+    };
+
+    voice2VadFrameId = requestAnimationFrame(tick);
+}
+
+function getVoice2RecordingMimeType() {
+    if (!window.MediaRecorder) return '';
+    const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus'
+    ];
+    return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
+}
+
+function deliverVoice2SegmentBlob(blob) {
+    const waiter = voice2SegmentBlobWaiters.shift();
+    if (waiter) {
+        waiter(blob);
+    } else {
+        voice2CompletedSegmentBlobs.push(blob);
+    }
+}
+
+function takeNextVoice2SegmentBlob(timeoutMs = 5000) {
+    if (voice2CompletedSegmentBlobs.length > 0) {
+        return Promise.resolve(voice2CompletedSegmentBlobs.shift());
+    }
+
+    return new Promise(resolve => {
+        let finished = false;
+        const complete = (blob) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            resolve(blob || null);
+        };
+        const timer = setTimeout(() => {
+            const index = voice2SegmentBlobWaiters.indexOf(complete);
+            if (index >= 0) voice2SegmentBlobWaiters.splice(index, 1);
+            complete(null);
+        }, timeoutMs);
+        voice2SegmentBlobWaiters.push(complete);
+    });
+}
+
+function startVoice2SegmentRecorder() {
+    if (!realtimeMicStream || !window.MediaRecorder) return;
+    if (voice2SegmentRecorder && voice2SegmentRecorder.state !== 'inactive') return;
+
+    try {
+        const mimeType = getVoice2RecordingMimeType();
+        voice2SegmentChunks = [];
+        voice2SegmentRecorder = mimeType
+            ? new MediaRecorder(realtimeMicStream, { mimeType })
+            : new MediaRecorder(realtimeMicStream);
+
+        voice2SegmentRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) voice2SegmentChunks.push(event.data);
+        };
+
+        voice2SegmentRecorder.onstop = () => {
+            const recorder = voice2SegmentRecorder;
+            const blobType = recorder?.mimeType || mimeType || 'audio/webm';
+            const blob = new Blob(voice2SegmentChunks, { type: blobType });
+            const discard = voice2DiscardNextSegment;
+            voice2DiscardNextSegment = false;
+            voice2SegmentChunks = [];
+            voice2SegmentRecorder = null;
+
+            if (!discard && blob.size > 500) {
+                deliverVoice2SegmentBlob(blob);
+            }
+
+            if (
+                realtimePeerConnection &&
+                realtimeSessionPracticeId === currentPracticeId &&
+                isVoiceInputSelected() &&
+                !realtimeFallbackActive
+            ) {
+                startVoice2SegmentRecorder();
+            }
+        };
+
+        voice2SegmentRecorder.start();
+    } catch (error) {
+        // 錄音保存失敗不應阻斷即時對話。
+        console.warn('Voice 2.0 分段錄音啟動失敗:', error);
+    }
+}
+
+function finishVoice2SegmentRecording() {
+    try {
+        if (voice2SegmentRecorder && voice2SegmentRecorder.state === 'recording') {
+            voice2SegmentRecorder.stop();
+        }
+    } catch (error) {
+        console.warn('Voice 2.0 分段錄音停止失敗:', error);
+    }
+}
+
+async function saveVoice2RecordingForTranscript(transcript) {
+    try {
+        const practiceId = currentPracticeId;
+        if (!practiceId || !transcript) return;
+
+        const blob = await takeNextVoice2SegmentBlob();
+        if (!blob) {
+            console.warn('Voice 2.0 找不到對應的錄音片段，略過 S3 保存');
+            return;
+        }
+
+        const baseType = (blob.type || 'audio/webm').split(';')[0];
+        const extension = baseType === 'audio/ogg' ? 'ogg' : 'webm';
+        const formData = new FormData();
+        formData.append('audio', blob, `voice-${Date.now()}.${extension}`);
+        formData.append('practiceId', practiceId);
+        formData.append('transcription', transcript);
+
+        const response = await fetchWithAuth('/api/audio/save-recording', {
+            method: 'POST',
+            headers: {},
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || '錄音保存失敗');
+        }
+
+        await loadRecordingsHistory(practiceId);
+    } catch (error) {
+        // 保存研究錄音失敗不阻斷主對話，避免使用者卡住。
+        console.error('Voice 2.0 錄音保存錯誤:', error);
+    }
+}
+
+function waitForRealtimeDataChannelOpen(dataChannel, timeoutMs = 10000) {
+    if (dataChannel.readyState === 'open') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Realtime data channel 連線逾時')), timeoutMs);
+        const onOpen = () => {
+            clearTimeout(timeout);
+            dataChannel.removeEventListener('open', onOpen);
+            resolve();
+        };
+        dataChannel.addEventListener('open', onOpen);
+    });
+}
+
+
+
+async function normalizeVoice2TranscriptToTraditional(text) {
+    const rawText = (text || '').trim();
+    if (!rawText || !currentPracticeId) return rawText;
+
+    try {
+        const response = await fetchWithAuth('/api/realtime/normalize-transcript', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                practiceId: currentPracticeId,
+                text: rawText
+            })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success || typeof data.text !== 'string') {
+            throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        return data.text.trim() || rawText;
+    } catch (error) {
+        // 繁體化失敗不應中斷練習；最差只回到 Realtime 原始逐字稿。
+        console.warn('Voice 2.0 繁體轉換失敗，保留原始逐字稿:', error.message);
+        return rawText;
+    }
+}
+
+async function handleRealtimeTranscriptionEvent(event) {
+    if (!event || !event.type) return;
+
+    if (event.type === 'conversation.item.input_audio_transcription.delta') {
+        const itemId = event.item_id || 'current';
+        const current = realtimeTranscriptByItem.get(itemId) || '';
+        const updated = current + (event.delta || '');
+        realtimeTranscriptByItem.set(itemId, updated);
+
+        if (updated.trim()) {
+            // transcript delta 也能當成本地 VAD 的第二層保險：即使某支麥克風
+            // 音量特別小，只要模型已經聽到文字，就視為使用者正在說話。
+            if (!voice2CommitPending && !realtimeVoiceTurnBusy) {
+                const now = performance.now();
+                if (!voice2LocalSpeechActive) {
+                    voice2LocalSpeechActive = true;
+                    voice2LocalSpeechStartedAt = now;
+                }
+                voice2LastVoiceAt = now;
+                recordStatus.textContent = '🎙️ 正在聆聽…說完後系統會自動送出';
+            }
+            updateTranscriptionPreview(updated.trim());
+        }
+        return;
+    }
+
+    if (event.type === 'conversation.item.input_audio_transcription.completed') {
+        clearVoice2CommitTimeout();
+        voice2CommitPending = false;
+        resetVoice2LocalVadTurn();
+
+        const itemId = event.item_id || `item-${Date.now()}`;
+        if (realtimeProcessedItemIds.has(itemId)) return;
+        realtimeProcessedItemIds.add(itemId);
+        realtimeTranscriptByItem.delete(itemId);
+
+        const rawFinalTranscript = (event.transcript || '').trim();
+        if (!rawFinalTranscript) {
+            clearTranscriptionPreview();
+            // 本輪沒有文字時，不要讓剛剛的空白錄音片段排隊到下一輪。
+            takeNextVoice2SegmentBlob(1500).catch(() => null);
+            if (
+                realtimePeerConnection &&
+                realtimeSessionPracticeId === currentPracticeId &&
+                isVoiceInputSelected() &&
+                !realtimeFallbackActive
+            ) {
+                setRealtimeMicEnabled(true);
+                recordStatus.textContent = '🎙️ 沒有辨識到內容，請再說一次。';
+            }
+            return;
+        }
+
+        // Realtime 模型有時即使指定 zh-tw 仍會回簡體；在正式送出前用本地
+        // OpenCC 統一成台灣繁體。這一步不會再呼叫 OpenAI。
+        const finalTranscript = await normalizeVoice2TranscriptToTraditional(rawFinalTranscript);
+        updateTranscriptionPreview(finalTranscript);
+
+        // S3 保存與 AI 對話並行，不再把 S3 放在轉錄關鍵路徑中。
+        saveVoice2RecordingForTranscript(finalTranscript);
+
+        if (realtimeVoiceTurnBusy) return;
+        realtimeVoiceTurnBusy = true;
+        setRealtimeMicEnabled(false);
+        recordStatus.textContent = 'AI 家長正在思考…';
+
+        try {
+            await handleSubmission(finalTranscript, { awaitVoicePlayback: true });
+        } finally {
+            realtimeVoiceTurnBusy = false;
+            if (
+                realtimePeerConnection &&
+                realtimeSessionPracticeId === currentPracticeId &&
+                isVoiceInputSelected() &&
+                !realtimeFallbackActive
+            ) {
+                resetVoice2LocalVadTurn();
+                setRealtimeMicEnabled(true);
+                recordStatus.textContent = '🎙️ 即時語音已開啟，直接說話即可，停下後會自動送出。';
+            }
+        }
+        return;
+    }
+
+    if (event.type === 'error') {
+        console.error('OpenAI Realtime event error:', event.error || event);
+        if (!realtimeFallbackActive) {
+            const message = event.error?.message || 'Realtime 語音服務發生錯誤';
+            fallbackToManualVoice(new Error(message));
+        }
+    }
+}
+
+async function stopRealtimeVoiceSession({ showManualControls = false } = {}) {
+    realtimeVoiceTurnBusy = false;
+    voice2CommitPending = false;
+    clearVoice2CommitTimeout();
+    stopVoice2LocalVad();
+    realtimeTranscriptByItem.clear();
+    realtimeProcessedItemIds.clear();
+
+    if (voice2SegmentRecorder && voice2SegmentRecorder.state === 'recording') {
+        voice2DiscardNextSegment = true;
+        try { voice2SegmentRecorder.stop(); } catch (_) {}
+    }
+
+    if (realtimeDataChannel) {
+        try { realtimeDataChannel.close(); } catch (_) {}
+        realtimeDataChannel = null;
+    }
+    if (realtimePeerConnection) {
+        try { realtimePeerConnection.close(); } catch (_) {}
+        realtimePeerConnection = null;
+    }
+    if (realtimeMicStream) {
+        realtimeMicStream.getTracks().forEach(track => track.stop());
+        realtimeMicStream = null;
+    }
+
+    realtimeSessionPracticeId = null;
+    voice2CompletedSegmentBlobs = [];
+    voice2SegmentBlobWaiters.splice(0).forEach(resolve => resolve(null));
+
+    if (showManualControls) setVoice2Controls(false);
+}
+
+async function fallbackToManualVoice(error) {
+    console.warn('Voice 2.0 無法啟動，切回手動錄音:', error);
+    realtimeFallbackActive = true;
+    await stopRealtimeVoiceSession({ showManualControls: true });
+    if (startRecordBtn) startRecordBtn.disabled = false;
+    if (stopRecordBtn) stopRecordBtn.disabled = true;
+    recordStatus.textContent = `即時語音暫時不可用，已切回手動錄音。${error?.message ? `（${error.message}）` : ''}`;
+}
+
+async function startRealtimeVoiceSession(practiceId) {
+    if (!VOICE2_REALTIME_ENABLED || !practiceId || !isVoiceInputSelected() || !isVoice2DialogueActive()) return false;
+    if (realtimePeerConnection && realtimeSessionPracticeId === practiceId) {
+        if (isNonverbalEnabled && window.nonverbalAnalysis && !nonverbalAnalysisActive) {
+            try {
+                if (nonverbalWindow) nonverbalWindow.style.display = 'block';
+                await window.nonverbalAnalysis.start();
+                nonverbalAnalysisActive = true;
+            } catch (error) {
+                console.warn('Voice 2.0 非語言分析啟動失敗:', error);
+            }
+        }
+        return true;
+    }
+    if (realtimeStartingPromise) return realtimeStartingPromise;
+
+    realtimeStartingPromise = (async () => {
+        try {
+            realtimeFallbackActive = false;
+            await stopRealtimeVoiceSession();
+            setVoice2Controls(true);
+            recordStatus.textContent = '正在啟動即時語音…';
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+            realtimeMicStream = stream;
+
+            const pc = new RTCPeerConnection();
+            realtimePeerConnection = pc;
+            realtimeSessionPracticeId = practiceId;
+
+            stream.getAudioTracks().forEach(track => pc.addTrack(track, stream));
+
+            const dc = pc.createDataChannel('oai-events');
+            realtimeDataChannel = dc;
+            dc.addEventListener('message', (messageEvent) => {
+                try {
+                    const event = JSON.parse(messageEvent.data);
+                    handleRealtimeTranscriptionEvent(event);
+                } catch (error) {
+                    console.warn('無法解析 Realtime event:', error);
+                }
+            });
+
+            pc.addEventListener('connectionstatechange', () => {
+                if (pc.connectionState === 'failed') {
+                    fallbackToManualVoice(new Error('Realtime WebRTC 連線失敗'));
+                }
+            });
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            // Voice 2.0 v2：先向 CommAI 後端取得短效 Realtime client secret。
+            // 真正的 OPENAI_API_KEY 仍只存在伺服器；瀏覽器拿到的是短效憑證。
+            const tokenResponse = await fetchWithAuth(
+                `/api/realtime/client-secret?practiceId=${encodeURIComponent(practiceId)}`,
+                { method: 'POST' }
+            );
+
+            const tokenData = await tokenResponse.json().catch(() => ({}));
+            if (!tokenResponse.ok || !tokenData.value) {
+                const upstream = tokenData.upstreamStatus ? ` / OpenAI ${tokenData.upstreamStatus}` : '';
+                const detail = tokenData.upstreamMessage ? `：${tokenData.upstreamMessage}` : '';
+                throw new Error(tokenData.error || `Realtime client secret 建立失敗 (${tokenResponse.status}${upstream})${detail}`);
+            }
+
+            // 使用短效憑證由瀏覽器直接與 OpenAI 建立 WebRTC，避免 CommAI server
+            // 代理 SDP 而成為初始化的關鍵路徑。
+            const sdpResponse = await fetch('https://api.openai.com/v1/realtime/calls', {
+                method: 'POST',
+                body: offer.sdp,
+                headers: {
+                    Authorization: `Bearer ${tokenData.value}`,
+                    'Content-Type': 'application/sdp'
+                }
+            });
+
+            const answerSdp = await sdpResponse.text();
+            if (!sdpResponse.ok) {
+                let detail = answerSdp;
+                try {
+                    const parsed = JSON.parse(answerSdp);
+                    detail = parsed?.error?.message || answerSdp;
+                } catch (_) {}
+                throw new Error(`OpenAI WebRTC 建立失敗 (${sdpResponse.status})${detail ? `：${String(detail).slice(0, 240)}` : ''}`);
+            }
+
+            await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+            await waitForRealtimeDataChannelOpen(dc);
+
+            startVoice2SegmentRecorder();
+            await startVoice2LocalVad();
+
+            if (isNonverbalEnabled && window.nonverbalAnalysis && !nonverbalAnalysisActive) {
+                try {
+                    if (nonverbalWindow) nonverbalWindow.style.display = 'block';
+                    await window.nonverbalAnalysis.start();
+                    nonverbalAnalysisActive = true;
+                } catch (error) {
+                    console.warn('Voice 2.0 非語言分析啟動失敗:', error);
+                }
+            }
+
+            recordStatus.textContent = '🎙️ 即時語音已開啟，直接說話即可，停下後會自動送出。';
+            return true;
+        } catch (error) {
+            await fallbackToManualVoice(error);
+            return false;
+        } finally {
+            realtimeStartingPromise = null;
+        }
+    })();
+
+    return realtimeStartingPromise;
+}
+
 // 開始對話
 async function startDialogue(practiceId, specifiedScenario = null) {
     if (!checkAuthStatus()) return;
+    await stopRealtimeVoiceSession();
 
     const scenarioDisplay = document.getElementById('scenarioDisplay');
     const dialogueDisplay = document.getElementById('dialogueDisplay');
@@ -1397,6 +2052,10 @@ async function startDialogue(practiceId, specifiedScenario = null) {
             startCountdown();
         }
 
+        if (isVoiceInputSelected()) {
+            await startRealtimeVoiceSession(practiceId);
+        }
+
     } catch (error) {
         console.error('開始對話失敗:', error);
         alert(`錯誤：${error.message}`);
@@ -1464,7 +2123,7 @@ submitTextBtn.addEventListener('click', async () => {
 });
 
 // 統一提交處理 (語音/文字)
-async function handleSubmission(text) {
+async function handleSubmission(text, options = {}) {
     try {
         const difficulty = difficultySelect.value;
         isWaitingForSubmission = false;
@@ -1527,7 +2186,10 @@ async function handleSubmission(text) {
             const parentMsgId = `parent-msg-${Date.now()}`;
             updateDialogueDisplay("家長", data.response, null, parentMsgId);
             const ttsVoice = getSelectedCharacterVoice();
-            fetchTtsAndPlay(data.response, ttsVoice, parentMsgId);
+            const ttsPromise = fetchTtsAndPlay(data.response, ttsVoice, parentMsgId);
+            if (options.awaitVoicePlayback) {
+                await ttsPromise;
+            }
             enableUserInput();
 
             const count = typeof data.turnCount === 'number' ? data.turnCount : turnProgress.count;
@@ -1864,40 +2526,194 @@ function playAudio(audioFilePath) {
     });
 }
 
-// 背景產生 TTS，完成後自動播放並更新訊息泡泡的播放按鈕
+// 幫訊息泡泡補上可重播的語音按鈕
+function attachAudioReplayButton(messageId, audioUrl) {
+    if (!messageId || !audioUrl) return;
+    const msgDiv = document.getElementById(messageId);
+    if (!msgDiv) return;
+    const contentDiv = msgDiv.querySelector('.message-content');
+    if (!contentDiv || contentDiv.querySelector('.play-audio-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'play-audio-btn';
+    btn.title = '播放語音';
+    btn.textContent = '🔊 播放';
+    btn.onclick = () => playAudio(audioUrl);
+    contentDiv.appendChild(btn);
+}
+
+function waitForAudioEnded(audio, timeoutMs = 180000) {
+    return new Promise(resolve => {
+        let done = false;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            audio.removeEventListener('ended', finish);
+            audio.removeEventListener('error', finish);
+            resolve();
+        };
+        const timer = setTimeout(finish, timeoutMs);
+        audio.addEventListener('ended', finish, { once: true });
+        audio.addEventListener('error', finish, { once: true });
+    });
+}
+
+function appendToSourceBuffer(sourceBuffer, chunk) {
+    return new Promise((resolve, reject) => {
+        const cleanup = () => {
+            sourceBuffer.removeEventListener('updateend', onUpdateEnd);
+            sourceBuffer.removeEventListener('error', onError);
+        };
+        const onUpdateEnd = () => { cleanup(); resolve(); };
+        const onError = () => { cleanup(); reject(new Error('瀏覽器音訊串流緩衝失敗')); };
+        sourceBuffer.addEventListener('updateend', onUpdateEnd, { once: true });
+        sourceBuffer.addEventListener('error', onError, { once: true });
+        try {
+            sourceBuffer.appendBuffer(chunk);
+        } catch (error) {
+            cleanup();
+            reject(error);
+        }
+    });
+}
+
+async function fetchLegacyTtsAndPlay(text, voice, messageId) {
+    const res = await fetchWithAuth('/api/dialogue/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice, practiceId: currentPracticeId })
+    });
+    const data = await res.json();
+    if (!data.success || !data.audioFilePath) return;
+
+    stopCurrentAudio();
+    currentAudioPlayer = new Audio(data.audioFilePath);
+    const ended = waitForAudioEnded(currentAudioPlayer);
+    try {
+        await currentAudioPlayer.play();
+        await ended;
+    } catch (error) {
+        console.warn('自動播放被瀏覽器阻擋:', error);
+    }
+    attachAudioReplayButton(messageId, data.audioFilePath);
+}
+
+// Voice 2.0：直接讀取 TTS response stream，第一批 MP3 bytes 到達後就開始播放。
 async function fetchTtsAndPlay(text, voice, messageId) {
     try {
         if (!currentPracticeId) return;
-        const res = await fetchWithAuth('/api/dialogue/tts', {
+
+        const res = await fetchWithAuth('/api/dialogue/tts-stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text, voice, practiceId: currentPracticeId })
         });
-        const data = await res.json();
-        if (!data.success || !data.audioFilePath) return;
+        if (!res.ok) throw new Error(`TTS stream API 失敗 (${res.status})`);
 
-        // 自動播放
-        playAudio(data.audioFilePath);
+        const canUseMediaSource = Boolean(
+            res.body &&
+            window.MediaSource &&
+            typeof MediaSource.isTypeSupported === 'function' &&
+            MediaSource.isTypeSupported('audio/mpeg')
+        );
 
-        // 若訊息泡泡存在，補上播放按鈕
-        if (messageId) {
-            const msgDiv = document.getElementById(messageId);
-            if (msgDiv) {
-                const contentDiv = msgDiv.querySelector('.message-content');
-                if (contentDiv && !contentDiv.querySelector('.play-audio-btn')) {
-                    const btn = document.createElement('button');
-                    btn.className = 'play-audio-btn';
-                    btn.title = '播放語音';
-                    btn.textContent = '🔊 播放';
-                    btn.onclick = () => playAudio(data.audioFilePath);
-                    contentDiv.appendChild(btn);
-                }
+        // 少數不支援 MediaSource MP3 的瀏覽器仍可正常播放，只是會等完整音訊。
+        if (!canUseMediaSource) {
+            const blob = await res.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            voice2TtsObjectUrls.push(objectUrl);
+            attachAudioReplayButton(messageId, objectUrl);
+
+            stopCurrentAudio();
+            currentAudioPlayer = new Audio(objectUrl);
+            const ended = waitForAudioEnded(currentAudioPlayer);
+            try {
+                await currentAudioPlayer.play();
+                await ended;
+            } catch (error) {
+                console.warn('自動播放被瀏覽器阻擋:', error);
             }
+            return;
         }
-    } catch (e) {
-        console.error('背景 TTS 失敗:', e);
+
+        stopCurrentAudio();
+        const mediaSource = new MediaSource();
+        const streamUrl = URL.createObjectURL(mediaSource);
+        const audio = new Audio(streamUrl);
+        currentAudioPlayer = audio;
+        const endedPromise = waitForAudioEnded(audio);
+        const allChunks = [];
+        let playbackStarted = false;
+        let playAttempt = null;
+
+        await new Promise((resolve, reject) => {
+            mediaSource.addEventListener('sourceopen', async () => {
+                try {
+                    const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+                    const reader = res.body.getReader();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        if (!value || value.byteLength === 0) continue;
+
+                        const chunk = new Uint8Array(value);
+                        allChunks.push(chunk.slice());
+                        await appendToSourceBuffer(sourceBuffer, chunk);
+
+                        if (!playbackStarted) {
+                            playbackStarted = true;
+                            playAttempt = audio.play()
+                                .then(() => true)
+                                .catch(error => {
+                                    console.warn('TTS 自動播放被瀏覽器阻擋:', error);
+                                    return false;
+                                });
+                        }
+                    }
+
+                    if (mediaSource.readyState === 'open') mediaSource.endOfStream();
+                    resolve();
+                } catch (error) {
+                    reject(error);
+                }
+            }, { once: true });
+            mediaSource.addEventListener('error', () => reject(new Error('MediaSource 初始化失敗')), { once: true });
+        });
+
+        // 保留完整音訊 Blob，讓同一頁中的「播放」按鈕仍可重播。
+        const replayBlob = new Blob(allChunks, { type: 'audio/mpeg' });
+        const replayUrl = URL.createObjectURL(replayBlob);
+        voice2TtsObjectUrls.push(replayUrl);
+        attachAudioReplayButton(messageId, replayUrl);
+
+        const playbackSucceeded = playAttempt ? await playAttempt : false;
+        if (playbackSucceeded || !audio.paused) {
+            await endedPromise;
+        }
+
+        URL.revokeObjectURL(streamUrl);
+    } catch (error) {
+        console.error('Voice 2.0 TTS 串流失敗，切回舊版 TTS:', error);
+        try {
+            await fetchLegacyTtsAndPlay(text, voice, messageId);
+        } catch (fallbackError) {
+            console.error('舊版 TTS 也失敗:', fallbackError);
+        }
     }
 }
+
+window.addEventListener('beforeunload', () => {
+    try {
+        if (realtimeDataChannel) realtimeDataChannel.close();
+        if (realtimePeerConnection) realtimePeerConnection.close();
+        if (realtimeMicStream) realtimeMicStream.getTracks().forEach(track => track.stop());
+        voice2TtsObjectUrls.forEach(url => {
+            try { URL.revokeObjectURL(url); } catch (_) {}
+        });
+    } catch (_) {}
+});
 
 function stopCurrentAudio() {
     if (currentAudioPlayer) {
@@ -2143,6 +2959,7 @@ async function endDialogue() {
 
     // 顯示 loading 覆蓋
     showAnalysisLoading(true);
+    await stopRealtimeVoiceSession();
     disableUserInput();
     stopCountdown();
     const extendBtn = document.getElementById('extendTimeBtn');
@@ -2241,6 +3058,7 @@ function getSelectedCharacterVoice() {
 }
 
 async function handleDialogueEnd(practiceId, analysis) {
+    await stopRealtimeVoiceSession();
     if (isNonverbalEnabled && window.nonverbalAnalysis) {
         try {
             window.nonverbalAnalysis.stop();

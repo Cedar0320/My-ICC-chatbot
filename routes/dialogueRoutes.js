@@ -568,7 +568,7 @@ const {
 const { analyzeDialogue } = require('../services/analysisService');
 const { getPracticeDetails } = require('../services/practiceService');
 const { updateOwnedPractice: updatePractice } = require('../services/ownedPracticeService');
-const { generateChatResponse, generateSpeech } = require('../services/openaiService'); // 匯入 OpenAI API 工具和 generateSpeech
+const { generateChatResponse, generateSpeech, generateSpeechStream } = require('../services/openaiService'); // 匯入 OpenAI API 工具
 const path = require('path');
 
 // ==================== 非語言數據驗證工具函數 ====================
@@ -989,7 +989,46 @@ ${difficultyLevel}
         });
     }
 });
-// 背景 TTS：前端取得文字後另行呼叫，產生語音並回傳路徑
+// Voice 2.0：直接串流 TTS 音訊，不先寫入 temp MP3。
+router.post('/tts-stream', async (req, res) => {
+    try {
+        const { text, voice, practiceId } = req.body;
+        if (!practiceId || !mongoose.Types.ObjectId.isValid(practiceId)) {
+            return res.status(400).json({ success: false, error: '有效的 practiceId 為必填' });
+        }
+        if (!text || typeof text !== 'string' || !text.trim()) {
+            return res.status(400).json({ success: false, error: 'text 為必填' });
+        }
+        if (text.length > 1000) {
+            return res.status(400).json({ success: false, error: 'TTS 文字不可超過1000字' });
+        }
+
+        await getPracticeDetails(req.user.id, practiceId);
+        const speechStream = await generateSpeechStream(text.trim(), voice || 'nova');
+
+        res.status(200);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+
+        speechStream.on('error', (streamError) => {
+            console.error('TTS 串流中斷:', streamError.message);
+            if (!res.headersSent) {
+                res.status(500).end();
+            } else {
+                res.end();
+            }
+        });
+        speechStream.pipe(res);
+    } catch (error) {
+        console.error('TTS 串流錯誤:', error.message);
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, error: error.message });
+        }
+    }
+});
+
+// 舊版 TTS fallback：保留完整 MP3 寫檔流程。
 router.post('/tts', async (req, res) => {
     try {
         const { text, voice, practiceId } = req.body;
