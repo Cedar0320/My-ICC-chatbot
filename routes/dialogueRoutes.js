@@ -571,6 +571,35 @@ const { updateOwnedPractice: updatePractice } = require('../services/ownedPracti
 const { generateChatResponse, generateSpeech, generateSpeechStream } = require('../services/openaiService'); // 匯入 OpenAI API 工具
 const path = require('path');
 
+// Voice 2.0 成本保護：所有輸入方式共用同一套硬上限。
+const PRACTICE_TURN_REMINDER = 8;
+const PRACTICE_TURN_HARD_LIMIT = 10;
+const BASIC_TIME_LIMIT_SECONDS = 8 * 60;
+const CHALLENGE_TIME_LIMIT_SECONDS = 6 * 60;
+
+function getPracticeTimeLimitSeconds(challengeMode) {
+    return challengeMode ? CHALLENGE_TIME_LIMIT_SECONDS : BASIC_TIME_LIMIT_SECONDS;
+}
+
+function getTeacherTurnCountFromState(dialogueState) {
+    if (!dialogueState?.history) return 0;
+    return dialogueState.history.filter(
+        h => h && h.role === '導師' && typeof h.content === 'string' && h.content.trim()
+    ).length;
+}
+
+function getDialogueDeadlineAt(dialogueState) {
+    const startedAt = Number(dialogueState?.startedAt || dialogueState?.challengeStartTime || 0);
+    if (!startedAt) return null;
+    const limitSeconds = Number(dialogueState?.timeLimitSeconds || getPracticeTimeLimitSeconds(Boolean(dialogueState?.challengeMode)));
+    return startedAt + (limitSeconds * 1000);
+}
+
+function isDialogueTimeExpired(dialogueState, now = Date.now()) {
+    const deadlineAt = getDialogueDeadlineAt(dialogueState);
+    return Boolean(deadlineAt && now >= deadlineAt);
+}
+
 // ==================== 非語言數據驗證工具函數 ====================
 
 /**
@@ -723,14 +752,24 @@ router.post('/start-dialogue', async (req, res) => {
 
         const { scenario } = parsedResponse;
 
-        // 對話歷史從空白開始，學生先開口
+        // 對話歷史從空白開始，學生先開口。
+        // 計時從情境載入完成、正式可開始作答的時間點起算。
+        const challengeMode = difficulty === '挑戰';
+        const startedAt = Date.now();
+        const timeLimitSeconds = getPracticeTimeLimitSeconds(challengeMode);
+        const deadlineAt = startedAt + (timeLimitSeconds * 1000);
+
         updateDialogueState(userId, practiceId, {
             scenario,
             parentPersonality: selectedPersonality,
             history: [],
             count: 0,
-            challengeMode: difficulty === '挑戰',
-            challengeStartTime: difficulty === '挑戰' ? Date.now() : null
+            challengeMode,
+            challengeStartTime: challengeMode ? startedAt : null,
+            startedAt,
+            timeLimitSeconds,
+            turnLimit: PRACTICE_TURN_HARD_LIMIT,
+            deadlineGraceUsed: false
         });
 
         await updatePractice(userId, practiceId, { scenario });
@@ -738,10 +777,13 @@ router.post('/start-dialogue', async (req, res) => {
         res.json({
             success: true,
             scenario,
-            challengeMode: difficulty === '挑戰',
-            challengeDuration: difficulty === '挑戰' ? 300 : null,
+            challengeMode,
+            challengeDuration: timeLimitSeconds,
+            timeLimitSeconds,
+            deadlineAt: new Date(deadlineAt).toISOString(),
             turnCount: 0,
-            turnLimit: difficulty === '挑戰' ? null : 6
+            turnReminder: PRACTICE_TURN_REMINDER,
+            turnLimit: PRACTICE_TURN_HARD_LIMIT
         });
     } catch (error) {
         console.error('start-dialogue 錯誤:', error);
@@ -812,7 +854,14 @@ function parseInitialResponse(response) {
 // 更新 continue-dialogue 路由，確保在對話完成時更新分析結果
 router.post('/continue-dialogue', async (req, res) => {
     try {
-        const { userResponse, practiceId, challengeTimeOver, nonverbalData, characterVoice } = req.body;
+        const {
+            userResponse,
+            practiceId,
+            challengeTimeOver,
+            allowFinalTurnAfterDeadline = false,
+            nonverbalData,
+            characterVoice
+        } = req.body;
         const userId = req.user.id;
         console.log("收到請求：", req.body);
 
@@ -830,31 +879,48 @@ router.post('/continue-dialogue', async (req, res) => {
             throw new Error('對話狀態丟失或無效');
         }
 
-        const getTeacherTurnCount = () => {
-            if (!dialogueState?.history) return 0;
-            return dialogueState.history.filter(h => h && h.role === '導師' && typeof h.content === 'string' && h.content.trim()).length;
-        };
+        const getTeacherTurnCount = () => getTeacherTurnCountFromState(dialogueState);
+        const turnLimit = PRACTICE_TURN_HARD_LIMIT;
 
-        const turnLimit = dialogueState.challengeMode ? null : 6;
-
-        // 如果挑戰模式的倒計時結束，直接執行分析
-        if (dialogueState.challengeMode && challengeTimeOver) {
+        const completeDialogueForBudget = async (endReason, finalParentResponse = null) => {
             const analysis = await analyzeDialogue(userId, practiceId);
-            
-            // 保存對話完成狀態和分析結果到練習紀錄
             await updatePractice(userId, practiceId, {
-                history: dialogueState.history, // 直接覆蓋歷史記錄
+                history: dialogueState.history,
                 analysis
             });
-            
+            const finalTurnCount = getTeacherTurnCount();
             deleteDialogueState(userId, practiceId);
-            return res.json({ 
-                completed: true, 
+            return res.json({
+                success: true,
+                completed: true,
+                response: finalParentResponse || undefined,
                 analysis,
+                endReason,
                 practiceId,
-                turnCount: getTeacherTurnCount(),
+                turnCount: finalTurnCount,
+                turnReminder: PRACTICE_TURN_REMINDER,
                 turnLimit
             });
+        };
+
+        // 後端硬限制：即使前端計時器失效，也不能送出第 11 輪或在時間到後開新一輪。
+        if (getTeacherTurnCount() >= turnLimit) {
+            return completeDialogueForBudget('turn');
+        }
+        const expiredBeforeTurn = Boolean(challengeTimeOver || isDialogueTimeExpired(dialogueState));
+        const canUseDeadlineGrace = Boolean(
+            expiredBeforeTurn &&
+            allowFinalTurnAfterDeadline &&
+            !dialogueState.deadlineGraceUsed &&
+            getTeacherTurnCount() < turnLimit
+        );
+
+        if (expiredBeforeTurn && !canUseDeadlineGrace) {
+            return completeDialogueForBudget('time');
+        }
+        if (canUseDeadlineGrace) {
+            // 只允許硬上限到達當下「已經在說」的那一句完成，避免再開新一輪。
+            dialogueState.deadlineGraceUsed = true;
         }
 
         // 添加導師的回應到對話歷史
@@ -875,26 +941,6 @@ router.post('/continue-dialogue', async (req, res) => {
 
             addToHistory(userId, practiceId, historyEntry);
             incrementCount(userId, practiceId);
-        }
-
-        // 安全上限：基礎模式 24 句（12 輪），前端已透過「結束對話」按鈕控制流程
-        if (!dialogueState.challengeMode && dialogueState.count >= 24) {
-            const analysis = await analyzeDialogue(userId, practiceId);
-            
-            // 保存對話完成狀態和分析結果到練習紀錄
-            await updatePractice(userId, practiceId, {
-                history: dialogueState.history, // 直接覆蓋歷史記錄
-                analysis
-            });
-            
-            deleteDialogueState(userId, practiceId);
-            return res.json({ 
-                completed: true, 
-                analysis,
-                practiceId,
-                turnCount: getTeacherTurnCount(),
-                turnLimit
-            });
         }
 
         const parentPersonality = dialogueState.parentPersonality || '擔心但願意合作：有情緒（焦慮/不安），會提出疑問與顧慮，但願意聽老師說明並討論下一步。';
@@ -967,6 +1013,15 @@ ${difficultyLevel}
         addToHistory(userId, practiceId, { role: "家長", content: aiResponse });
         incrementCount(userId, practiceId);
 
+        const teacherTurnCount = getTeacherTurnCount();
+        const reachedTurnLimit = teacherTurnCount >= turnLimit;
+        const reachedTimeLimit = isDialogueTimeExpired(dialogueState);
+
+        if (reachedTurnLimit || reachedTimeLimit) {
+            // 第 10 輪或時間於本輪處理期間到達：保留家長最後一句，再自動分析。
+            return completeDialogueForBudget(reachedTurnLimit ? 'turn' : 'time', aiResponse);
+        }
+
         await updatePractice(userId, practiceId, {
             history: dialogueState.history,
             completed: false
@@ -977,8 +1032,12 @@ ${difficultyLevel}
             success: true,
             response: aiResponse,
             practiceId,
-            turnCount: getTeacherTurnCount(),
-            turnLimit
+            turnCount: teacherTurnCount,
+            turnReminder: PRACTICE_TURN_REMINDER,
+            turnLimit,
+            deadlineAt: getDialogueDeadlineAt(dialogueState)
+                ? new Date(getDialogueDeadlineAt(dialogueState)).toISOString()
+                : null
         });
 
     } catch (error) {

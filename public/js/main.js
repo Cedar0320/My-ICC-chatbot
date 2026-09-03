@@ -16,16 +16,24 @@ let totalPracticePages = 1;
 let currentFilters = {};
 
 let countdownTimer = null; 
-let challengeTimer = null; // 挑戰倒計時計時器
-let countdownRemaining = 300; // 倒計時剩餘時間（以秒為單位）5分鐘
-let totalChallengeExtension = 0; // 累計已延長秒數（最多60秒）
+let practiceBudgetTimer = null;
+let practiceDeadlineAt = null;
+let practiceTimeLimitSeconds = 0;
+let practiceTimeExpired = false;
+let practiceAutoEndInProgress = false;
+let practiceSubmissionInFlight = false;
+let practiceAllowFinalTurnAfterDeadline = false;
 let mediaRecorder = null;
 let audioChunks = [];
 let dialogueCount = 0;
 
-// 基礎模式評分門檻：導師回覆 6 次後產生分析（後端 count>=12 因為家長/導師都算）
-const BASIC_TURN_LIMIT = 6;
-let turnProgress = { count: 0, limit: null };
+// Voice 2.0 成本保護：語音與文字共用同一套練習上限。
+// 老師每成功送出一則完整回應 = 1 輪。
+const PRACTICE_TURN_REMINDER = 8;
+const PRACTICE_TURN_HARD_LIMIT = 10;
+const BASIC_TIME_LIMIT_SECONDS = 8 * 60;
+const CHALLENGE_TIME_LIMIT_SECONDS = 6 * 60;
+let turnProgress = { count: 0, limit: PRACTICE_TURN_HARD_LIMIT };
 
 function setTurnProgress(count, limit) {
     if (typeof count === 'number') turnProgress.count = count;
@@ -128,6 +136,7 @@ const voiceInputControls = document.getElementById('voiceInputControls');
 const textInputControls = document.getElementById('textInputControls');
 const textInput = document.getElementById('textInput');
 const submitTextBtn = document.getElementById('submitTextBtn');
+const practiceBudgetDisplay = document.getElementById('practiceBudgetDisplay');
 const inputMethodRadios = document.querySelectorAll('input[name="inputMethod"]');
 const enableNonverbalDetection = document.getElementById('enableNonverbalDetection');
 const nonverbalWindow = document.getElementById('nonverbalWindow');
@@ -255,8 +264,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             <ul>
                 <li><strong>Step 1:</strong> 選擇溝通技巧與模式：</li>
                 <ul>
-                    <li><strong>基礎模式：</strong>最多回應 6 句。</li>
-                    <li><strong>挑戰模式：</strong>限時 5 分鐘回應。</li>
+                    <li><strong>基礎模式：</strong>第 8 輪提醒收尾，第 10 輪自動結束，最長 8 分鐘。</li>
+                    <li><strong>挑戰模式：</strong>第 8 輪提醒收尾，第 10 輪自動結束，最長 6 分鐘。</li>
                 </ul>
                 <li><strong>Step 2:</strong> 按下「開始練習」按鈕後，練習將開始。</li>
                 <li><strong>Step 3:</strong> 根據家長的回應，按下「開始錄音」進行回應，完成後按「停止錄音」。系統將轉錄並分析您的回應。</li>
@@ -1390,6 +1399,7 @@ function clearVoice2CommitTimeout() {
 
 async function commitVoice2AudioTurn() {
     if (
+        turnProgress.count >= PRACTICE_TURN_HARD_LIMIT ||
         voice2CommitPending ||
         realtimeVoiceTurnBusy ||
         realtimeFallbackActive ||
@@ -1595,7 +1605,9 @@ function startVoice2SegmentRecorder() {
                 realtimePeerConnection &&
                 realtimeSessionPracticeId === currentPracticeId &&
                 isVoiceInputSelected() &&
-                !realtimeFallbackActive
+                !realtimeFallbackActive &&
+                !practiceTimeExpired &&
+                turnProgress.count < PRACTICE_TURN_HARD_LIMIT
             ) {
                 startVoice2SegmentRecorder();
             }
@@ -1739,7 +1751,9 @@ async function handleRealtimeTranscriptionEvent(event) {
                 realtimePeerConnection &&
                 realtimeSessionPracticeId === currentPracticeId &&
                 isVoiceInputSelected() &&
-                !realtimeFallbackActive
+                !realtimeFallbackActive &&
+                !practiceTimeExpired &&
+                turnProgress.count < PRACTICE_TURN_HARD_LIMIT
             ) {
                 setRealtimeMicEnabled(true);
                 recordStatus.textContent = '🎙️ 沒有辨識到內容，請再說一次。';
@@ -1768,7 +1782,9 @@ async function handleRealtimeTranscriptionEvent(event) {
                 realtimePeerConnection &&
                 realtimeSessionPracticeId === currentPracticeId &&
                 isVoiceInputSelected() &&
-                !realtimeFallbackActive
+                !realtimeFallbackActive &&
+                !practiceTimeExpired &&
+                turnProgress.count < PRACTICE_TURN_HARD_LIMIT
             ) {
                 resetVoice2LocalVadTurn();
                 setRealtimeMicEnabled(true);
@@ -2012,9 +2028,8 @@ async function startDialogue(practiceId, specifiedScenario = null) {
             throw new Error(data.message || 'API 回應失敗');
         }
 
-        const initialLimit = difficulty === '簡單' ? 8 : null;
         const initialCount = (typeof data.turnCount === 'number') ? data.turnCount : 0;
-        setTurnProgress(initialCount, initialLimit);
+        setTurnProgress(initialCount, PRACTICE_TURN_HARD_LIMIT);
 
         scenarioDisplay.innerHTML = `
             <div class="message-header">📝 情境</div>
@@ -2044,13 +2059,10 @@ async function startDialogue(practiceId, specifiedScenario = null) {
         if (actionBtns) actionBtns.style.display = 'flex';
 
         recordStatus.textContent = difficulty === '挑戰'
-            ? '挑戰模式（5分鐘），請輸入你的第一句話。'
-            : '基礎模式（建議6輪），請輸入你的第一句話。';
+            ? '挑戰模式：第 8 輪提醒、第 10 輪結束，時間上限 6 分鐘。請輸入你的第一句話。'
+            : '基礎模式：第 8 輪提醒、第 10 輪結束，時間上限 8 分鐘。請輸入你的第一句話。';
 
-        if (difficulty === '挑戰') {
-            totalChallengeExtension = 0;
-            startCountdown();
-        }
+        startPracticeBudgetTimer(difficulty, data.deadlineAt || null);
 
         if (isVoiceInputSelected()) {
             await startRealtimeVoiceSession(practiceId);
@@ -2078,22 +2090,9 @@ if (endDialogueBtn) {
     });
 }
 
-// 延長30秒按鈕（挑戰模式）
+// Voice 2.0 成本保護後，挑戰模式固定 6 分鐘硬上限，不再提供延長。
 const extendTimeBtn = document.getElementById('extendTimeBtn');
-if (extendTimeBtn) {
-    extendTimeBtn.addEventListener('click', () => {
-        if (totalChallengeExtension >= 60) {
-            recordStatus.textContent = '已達本次練習建議上限，建議結束對話並取得分析回饋。';
-            extendTimeBtn.style.display = 'none';
-            return;
-        }
-        totalChallengeExtension += 30;
-        countdownRemaining = 30;
-        extendTimeBtn.style.display = 'none';
-        recordStatus.textContent = '已延長30秒，請繼續對話。';
-        startCountdown();
-    });
-}
+if (extendTimeBtn) extendTimeBtn.style.display = 'none';
 
 // 提交文字處理
 submitTextBtn.addEventListener('click', async () => {
@@ -2108,22 +2107,41 @@ submitTextBtn.addEventListener('click', async () => {
         return;
     }
 
+    if (practiceTimeExpired || turnProgress.count >= PRACTICE_TURN_HARD_LIMIT) {
+        recordStatus.textContent = '本次練習已達上限，正在結束對話。';
+        await forceEndDialogueForBudget(practiceTimeExpired ? 'time' : 'turn');
+        return;
+    }
+
     try {
         submitTextBtn.disabled = true;
         recordStatus.textContent = '處理中...請稍候';
         await handleSubmission(text);
         textInput.value = '';
-        recordStatus.textContent = '文字已提交';
     } catch (error) {
         console.error('文字提交錯誤：', error);
         recordStatus.textContent = '發生錯誤：' + error.message;
     } finally {
-        submitTextBtn.disabled = false;
+        if (!practiceTimeExpired && turnProgress.count < PRACTICE_TURN_HARD_LIMIT && !practiceAutoEndInProgress) {
+            submitTextBtn.disabled = false;
+        }
     }
 });
 
 // 統一提交處理 (語音/文字)
 async function handleSubmission(text, options = {}) {
+    const allowAfterDeadline = Boolean(options.allowAfterDeadline || practiceAllowFinalTurnAfterDeadline);
+
+    if (turnProgress.count >= PRACTICE_TURN_HARD_LIMIT) {
+        await forceEndDialogueForBudget('turn');
+        return;
+    }
+    if (practiceTimeExpired && !allowAfterDeadline) {
+        await forceEndDialogueForBudget('time');
+        return;
+    }
+
+    practiceSubmissionInFlight = true;
     try {
         const difficulty = difficultySelect.value;
         isWaitingForSubmission = false;
@@ -2157,11 +2175,13 @@ async function handleSubmission(text, options = {}) {
                 userResponse: text,
                 practiceId: currentPracticeId,
                 challengeTimeOver: false,
+                allowFinalTurnAfterDeadline: allowAfterDeadline,
                 inputMethod: document.querySelector('input[name="inputMethod"]:checked').value,
                 nonverbalData: nonverbalData,
                 characterVoice: getSelectedCharacterVoice()
             })
         });
+        if (allowAfterDeadline) practiceAllowFinalTurnAfterDeadline = false;
 
         if (!response.ok) throw new Error('API 請求失敗');
 
@@ -2175,36 +2195,50 @@ async function handleSubmission(text, options = {}) {
                 typeof data.turnLimit !== 'undefined' ? data.turnLimit : turnProgress.limit
             );
         }
+        if (data.deadlineAt) {
+            const syncedDeadline = Date.parse(data.deadlineAt);
+            if (Number.isFinite(syncedDeadline)) practiceDeadlineAt = syncedDeadline;
+        }
 
-        if (data.completed && data.analysis) {
-            // 後端安全上限觸發
-            analysisContent.innerHTML = `<pre>${data.analysis}</pre>`;
-            disableUserInput();
-            await handleDialogueEnd(currentPracticeId, data.analysis);
-        } else if (data.response) {
-            // 立即顯示文字，背景產生語音
+        if (data.response) {
+            // 立即顯示文字，背景產生語音；即使本輪觸發硬上限，也讓家長完成最後回覆。
             const parentMsgId = `parent-msg-${Date.now()}`;
             updateDialogueDisplay("家長", data.response, null, parentMsgId);
             const ttsVoice = getSelectedCharacterVoice();
+            const shouldAwaitFinalVoice = Boolean(options.awaitVoicePlayback || data.completed);
             const ttsPromise = fetchTtsAndPlay(data.response, ttsVoice, parentMsgId);
-            if (options.awaitVoicePlayback) {
+            if (shouldAwaitFinalVoice) {
                 await ttsPromise;
             }
+        }
+
+        if (data.completed && data.analysis) {
+            // 後端硬上限已經完成「分析 + 寫入 DB + 刪除 dialogueState」。
+            // 這裡不能再呼叫 /end-dialogue，也不需要再 PATCH analysis；
+            // 直接走與時間到手動結束相同的 UI 收尾：停止即時功能後 reload，
+            // 讓既有初始化流程從 DB 讀回並顯示分析結果。
+            practiceAutoEndInProgress = true;
+            if (data.endReason === 'time') practiceTimeExpired = true;
+            analysisContent.innerHTML = `<pre>${data.analysis}</pre>`;
+            disableUserInput();
+            stopPracticeBudgetTimer();
+            updatePracticeBudgetDisplay({ forceEnded: true, endReason: data.endReason });
+            recordStatus.textContent = data.endReason === 'time'
+                ? '已達練習時間上限，對話已自動結束。'
+                : '已完成第 10 輪，對話已自動結束。';
+            await finalizeCompletedDialogueFromServer();
+        } else if (data.response) {
             enableUserInput();
 
             const count = typeof data.turnCount === 'number' ? data.turnCount : turnProgress.count;
-            if (difficulty === '簡單') {
-                if (count >= 8) {
-                    recordStatus.textContent = '已達本次練習建議上限，建議結束對話並取得分析回饋。';
-                } else if (count >= 6) {
-                    recordStatus.textContent = '已達建議練習輪次。你可以按下「結束對話」取得分析，或再延長 1 輪。';
-                } else if (count >= 5) {
-                    recordStatus.textContent = '你可以準備統整重點、提出合作方向，並進行收尾。';
-                } else {
-                    recordStatus.textContent = `請繼續對話。${getTurnProgressText()}`;
-                }
+            updatePracticeBudgetDisplay();
+            if (count >= PRACTICE_TURN_REMINDER) {
+                const remainingTurns = Math.max(0, PRACTICE_TURN_HARD_LIMIT - count);
+                recordStatus.textContent = remainingTurns > 0
+                    ? `已達第 ${count} 輪，請開始收尾；最多還可回應 ${remainingTurns} 輪。`
+                    : '已達第 10 輪，正在結束對話。';
             } else {
-                recordStatus.textContent = '請繼續對話，或按下「結束對話」取得分析。';
+                recordStatus.textContent = `請繼續對話。${getTurnProgressText()}`;
             }
         }
 
@@ -2213,7 +2247,14 @@ async function handleSubmission(text, options = {}) {
     } catch (error) {
         console.error('對話提交錯誤:', error);
         recordStatus.textContent = `錯誤：${error.message}`;
-        enableUserInput();
+        if (!practiceTimeExpired && turnProgress.count < PRACTICE_TURN_HARD_LIMIT) {
+            enableUserInput();
+        }
+    } finally {
+        practiceSubmissionInFlight = false;
+        if (practiceTimeExpired && !practiceAutoEndInProgress) {
+            await forceEndDialogueForBudget('time');
+        }
     }
 }
 
@@ -2291,6 +2332,13 @@ startRecordBtn.addEventListener('click', async () => {
                 await loadRecordingsHistory(currentPracticeId);
 
                 if (submissionTimer) clearTimeout(submissionTimer);
+
+                if (practiceTimeExpired && practiceAllowFinalTurnAfterDeadline && currentAccumulatedText.trim().length > 0) {
+                    await handleSubmission(currentAccumulatedText, { allowAfterDeadline: true });
+                    currentAccumulatedText = '';
+                    isWaitingForSubmission = false;
+                    return;
+                }
 
                 let countdown = 5;
                 isWaitingForSubmission = true;
@@ -2419,12 +2467,8 @@ startPracticeBtn.addEventListener('click', async () => {
 
         const difficulty = difficultySelect.value;
         const countdownDisplay = document.getElementById('countdownDisplay');
-
-        if (difficulty === '簡單') {
-            if(countdownDisplay) countdownDisplay.style.display = 'none';
-        } else if (difficulty === '挑戰') {
-            if(countdownDisplay) countdownDisplay.style.display = 'block';
-        }
+        if (countdownDisplay) countdownDisplay.style.display = 'none'; // 舊版錄音倒數不再作為練習總時間 UI。
+        if (practiceBudgetDisplay) practiceBudgetDisplay.style.display = 'none';
 
         // 📝 新增：設置選擇的角色
         const characterSelect = document.getElementById('characterSelect');
@@ -2890,68 +2934,155 @@ function enableUserInput() {
     if(stopRecordBtn) stopRecordBtn.disabled = true;
 }
 
-// 處理挑戰模式倒數與結束
-function startCountdown() {
+// Voice 2.0 成本保護：統一管理基礎／挑戰模式的總時間與輪數 UI。
+function formatPracticeTime(seconds) {
+    const safeSeconds = Math.max(0, Math.ceil(Number(seconds) || 0));
+    const minutes = Math.floor(safeSeconds / 60);
+    const secs = safeSeconds % 60;
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+function updatePracticeBudgetDisplay({ forceEnded = false, endReason = null } = {}) {
+    if (!practiceBudgetDisplay) return;
+
+    const count = Math.min(turnProgress.count || 0, PRACTICE_TURN_HARD_LIMIT);
+    let remainingSeconds = 0;
+    if (practiceDeadlineAt) {
+        remainingSeconds = Math.max(0, Math.ceil((practiceDeadlineAt - Date.now()) / 1000));
+    }
+
+    const modeLabel = difficultySelect.value === '挑戰' ? '挑戰模式' : '基礎模式';
+    const reminderText = count >= PRACTICE_TURN_REMINDER && count < PRACTICE_TURN_HARD_LIMIT
+        ? `｜請準備收尾，最多再 ${PRACTICE_TURN_HARD_LIMIT - count} 輪`
+        : '';
+
+    if (forceEnded) {
+        const reasonText = endReason === 'time' ? '時間已到' : '已達 10 輪';
+        practiceBudgetDisplay.textContent = `${modeLabel}｜進度 ${count}/${PRACTICE_TURN_HARD_LIMIT}｜${reasonText}`;
+    } else {
+        practiceBudgetDisplay.textContent = `${modeLabel}｜進度 ${count}/${PRACTICE_TURN_HARD_LIMIT}｜剩餘 ${formatPracticeTime(remainingSeconds)}${reminderText}`;
+    }
+    practiceBudgetDisplay.style.display = 'block';
+}
+
+function stopPracticeBudgetTimer() {
+    if (practiceBudgetTimer) {
+        clearInterval(practiceBudgetTimer);
+        practiceBudgetTimer = null;
+    }
+}
+
+function resetCountdown() {
+    stopPracticeBudgetTimer();
+    practiceDeadlineAt = null;
+    practiceTimeLimitSeconds = 0;
+    practiceTimeExpired = false;
+    practiceAutoEndInProgress = false;
+    practiceSubmissionInFlight = false;
+    practiceAllowFinalTurnAfterDeadline = false;
+    setTurnProgress(0, PRACTICE_TURN_HARD_LIMIT);
+    if (practiceBudgetDisplay) {
+        practiceBudgetDisplay.textContent = '';
+        practiceBudgetDisplay.style.display = 'none';
+    }
     const countdownDisplay = document.getElementById('countdownDisplay');
-    if(countdownDisplay) countdownDisplay.style.display = 'block';
+    if (countdownDisplay) {
+        countdownDisplay.textContent = '';
+        countdownDisplay.style.display = 'none';
+    }
+    if (extendTimeBtn) extendTimeBtn.style.display = 'none';
+}
 
-    challengeTimer = setInterval(() => {
-        countdownRemaining -= 1;
-        const minutes = Math.floor(countdownRemaining / 60);
-        const seconds = countdownRemaining % 60;
-        if(countdownDisplay) countdownDisplay.textContent = `倒計時: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+function stopCountdown() {
+    stopPracticeBudgetTimer();
+}
 
-        if (countdownRemaining === 30) {
-            recordStatus.textContent = '請準備回應家長最後的疑問，並進行收尾。';
+function startPracticeBudgetTimer(difficulty, serverDeadlineAt = null) {
+    stopPracticeBudgetTimer();
+    practiceTimeExpired = false;
+    practiceAutoEndInProgress = false;
+    practiceTimeLimitSeconds = difficulty === '挑戰'
+        ? CHALLENGE_TIME_LIMIT_SECONDS
+        : BASIC_TIME_LIMIT_SECONDS;
+
+    const parsedDeadline = serverDeadlineAt ? Date.parse(serverDeadlineAt) : NaN;
+    practiceDeadlineAt = Number.isFinite(parsedDeadline)
+        ? parsedDeadline
+        : Date.now() + (practiceTimeLimitSeconds * 1000);
+
+    updatePracticeBudgetDisplay();
+
+    practiceBudgetTimer = setInterval(() => {
+        const remainingMs = practiceDeadlineAt - Date.now();
+        updatePracticeBudgetDisplay();
+
+        // 剩 1 分鐘時只提醒一次，仍可正常完成目前輪次。
+        if (remainingMs <= 60_000 && remainingMs > 59_000) {
+            recordStatus.textContent = '剩餘約 1 分鐘，請準備統整重點並收尾。';
         }
 
-        if (countdownRemaining <= 0) {
-            clearInterval(challengeTimer);
-            challengeTimer = null;
-            if(countdownDisplay) countdownDisplay.style.display = 'none';
-            handleChallengeTimeUp();
+        if (remainingMs <= 0) {
+            stopPracticeBudgetTimer();
+            handlePracticeTimeLimitReached();
         }
     }, 1000);
 }
 
-function stopCountdown() {
-    if (challengeTimer) {
-        clearInterval(challengeTimer);
-        challengeTimer = null;
+async function handlePracticeTimeLimitReached() {
+    if (practiceTimeExpired || practiceAutoEndInProgress) return;
+    practiceTimeExpired = true;
+    updatePracticeBudgetDisplay();
+    recordStatus.textContent = '已達練習時間上限，正在結束本次對話。';
+
+    // 不再允許開啟新一輪。若 Voice 2.0 正在說話，讓當前句子 commit；
+    // 若已送出等待家長回覆，則等該回覆完成後再自動分析。
+    if (submitTextBtn) submitTextBtn.disabled = true;
+    if (startRecordBtn) startRecordBtn.disabled = true;
+
+    if (voice2LocalSpeechActive && !voice2CommitPending && !realtimeVoiceTurnBusy) {
+        // 使用者在硬上限到達的瞬間已經開口：允許這一句完整送出，但只允許一次。
+        practiceAllowFinalTurnAfterDeadline = true;
+        await commitVoice2AudioTurn();
+        return;
     }
-    countdownRemaining = 300;
+
+    if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+        // 舊版手動錄音 fallback 同樣保留「正在說的最後一句」。
+        practiceAllowFinalTurnAfterDeadline = true;
+        try { mediaRecorder.stop(); } catch (_) {}
+        return;
+    }
+
+    setRealtimeMicEnabled(false);
+
+    if (practiceSubmissionInFlight || realtimeVoiceTurnBusy || voice2CommitPending) {
+        return;
+    }
+
+    await forceEndDialogueForBudget('time');
 }
 
-function resetCountdown() {
-    if (challengeTimer) {
-        clearInterval(challengeTimer);
-        challengeTimer = null;
-    }
-    countdownRemaining = 300;
-    totalChallengeExtension = 0;
-    const countdownDisplay = document.getElementById('countdownDisplay');
-    if (countdownDisplay) {
-        countdownDisplay.textContent = '倒計時: 5:00';
-    }
-}
+async function forceEndDialogueForBudget(reason) {
+    if (practiceAutoEndInProgress || !currentPracticeId) return;
+    practiceAutoEndInProgress = true;
+    stopPracticeBudgetTimer();
+    setRealtimeMicEnabled(false);
+    disableUserInput();
 
-// 挑戰模式時間到：顯示選項，不自動分析
-function handleChallengeTimeUp() {
-    if (totalChallengeExtension >= 60) {
-        recordStatus.textContent = '已達本次練習建議上限，建議結束對話並取得分析回饋。';
-        const extendBtn = document.getElementById('extendTimeBtn');
-        if (extendBtn) extendBtn.style.display = 'none';
-    } else {
-        recordStatus.textContent = '已達建議練習時間。你可以按下「結束對話」取得分析，或延長30秒。';
-        const extendBtn = document.getElementById('extendTimeBtn');
-        if (extendBtn) extendBtn.style.display = '';
+    try {
+        recordStatus.textContent = reason === 'time'
+            ? '已達練習時間上限，正在產生分析…'
+            : '已完成第 10 輪，正在產生分析…';
+        await endDialogue({ automaticReason: reason });
+    } finally {
+        // 成功時頁面會 reload；失敗時允許使用者按「結束對話」重試，
+        // 但硬上限狀態仍保留，不重新開放輸入。
+        practiceAutoEndInProgress = false;
     }
 }
-
-
 
 // 手動結束對話並取得分析
-async function endDialogue() {
+async function endDialogue({ automaticReason = null } = {}) {
     if (!currentPracticeId) {
         recordStatus.textContent = '未找到練習 ID，請先開始練習。';
         return;
@@ -2994,7 +3125,9 @@ async function endDialogue() {
         console.error('結束對話時發生錯誤:', error);
         showAnalysisLoading(false);
         recordStatus.textContent = '分析失敗，請重試';
-        enableUserInput();
+        if (!automaticReason && !practiceTimeExpired && turnProgress.count < PRACTICE_TURN_HARD_LIMIT) {
+            enableUserInput();
+        }
     }
 }
 
@@ -3057,40 +3190,31 @@ function getSelectedCharacterVoice() {
     return voiceMap[selectedCharacter] || 'nova';
 }
 
-async function handleDialogueEnd(practiceId, analysis) {
+async function finalizeCompletedDialogueFromServer() {
+    // continue-dialogue 回傳 completed=true 時，後端已經完成分析並寫入 DB，
+    // dialogueState 也已刪除。此處只負責關閉前端資源並重新載入結果，
+    // 避免再次呼叫 end-dialogue 造成「對話狀態丟失」。
+    stopPracticeBudgetTimer();
     await stopRealtimeVoiceSession();
+    disableUserInput();
+    stopCountdown();
+
+    const extendBtn = document.getElementById('extendTimeBtn');
+    if (extendBtn) extendBtn.style.display = 'none';
+
     if (isNonverbalEnabled && window.nonverbalAnalysis) {
         try {
             window.nonverbalAnalysis.stop();
-            nonverbalAnalysisActive = false; // 重置狀態
-            console.log('✅ 對話結束,已停止非語言分析並重置狀態');
+            nonverbalAnalysisActive = false;
+            console.log('✅ 對話完成，已停止非語言分析並重置狀態');
         } catch (error) {
             console.error('停止非語言分析失敗:', error);
         }
     }
     if (nonverbalWindow) nonverbalWindow.style.display = 'none';
 
-    try {
-        await fetchWithAuth(`/api/practice/practices/${practiceId}`, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ analysis }),
-        });
-
-        await loadPractices();
-
-        const practiceItems = document.querySelectorAll('.practice-item');
-        for (const item of practiceItems) {
-            if (item.getAttribute('data-practice-id') === practiceId) {
-                item.click();
-                break;
-            }
-        }
-    } catch (error) {
-        console.error('更新練習記錄失敗:', error);
-    }
+    // 分析已在 DB 中；reload 後沿用既有初始化流程顯示該練習分析。
+    window.location.reload();
 }
 
 function showEndDialogueMessage() {
