@@ -685,10 +685,10 @@ function validateNonverbalData(data) {
 
 router.post('/start-dialogue', async (req, res) => {
     try {
-        const { technique, practiceId, difficulty, specifiedScenario } = req.body;
+        const { technique, practiceId, difficulty, specifiedScenario, reuseExactScenario = false } = req.body;
         const userId = req.user.id;
 
-        if (!technique || !practiceId || !difficulty) {
+        if (!practiceId) {
             console.error('缺少必要參數:', { technique, practiceId, difficulty });
             return res.status(400).json({
                 success: false,
@@ -706,11 +706,25 @@ router.post('/start-dialogue', async (req, res) => {
             });
         }
 
-        // 先確認練習屬於目前登入者，再建立獨立對話狀態。
-        await getPracticeDetails(userId, practiceId);
-        resetDialogueState(userId, practiceId, technique);
+        // 先確認練習屬於目前登入者。重新練習時，以 DB 中剛建立的 retry practice
+        // 為唯一設定來源，避免畫面下拉選單目前的值污染原本的技巧/難度/情境。
+        const practice = await getPracticeDetails(userId, practiceId);
+        const isExactRetry = Boolean(reuseExactScenario && practice.isRetry);
+        const effectiveTechnique = isExactRetry ? practice.technique : technique;
+        const effectiveDifficulty = isExactRetry ? practice.difficulty : difficulty;
 
-        const parentPersonalities = difficulty === '挑戰'
+        if (!effectiveTechnique || !effectiveDifficulty) {
+            console.error('缺少有效的練習設定:', { effectiveTechnique, effectiveDifficulty, practiceId });
+            return res.status(400).json({
+                success: false,
+                message: '缺少有效的練習設定',
+                details: { practiceId }
+            });
+        }
+
+        resetDialogueState(userId, practiceId, effectiveTechnique);
+
+        const parentPersonalities = effectiveDifficulty === '挑戰'
             ? [
                 '高防衛/強烈護短：第一反應是否認或淡化孩子問題，質疑老師處理方式，要求證據與具體情況。',
                 '指責型/不信任：覺得老師在針對孩子，情緒較激動，容易打斷，會追問「你們到底要怎麼做」。',
@@ -724,37 +738,48 @@ router.post('/start-dialogue', async (req, res) => {
 
         const selectedPersonality = parentPersonalities[Math.floor(Math.random() * parentPersonalities.length)];
 
-        let selectedScenario;
-        if (specifiedScenario) {
-            console.log('使用指定情境:', specifiedScenario);
-            selectedScenario = specifiedScenario;
+        let scenario;
+        if (isExactRetry) {
+            // 重新練習要的是「同一題」：直接使用 retry practice 已複製好的完整情境，
+            // 不再把舊情境交給 AI 重寫，避免內容漂移，也少一次 API 呼叫。
+            scenario = String(practice.scenario || '').trim();
+            if (!scenario) {
+                throw new Error('重新練習缺少原始情境內容');
+            }
+            console.log('重新練習：直接沿用原始完整情境');
         } else {
-            selectedScenario = scenarios[Math.floor(Math.random() * scenarios.length)];
-            console.log('選擇隨機情境:', selectedScenario);
+            let selectedScenario;
+            if (specifiedScenario) {
+                console.log('使用指定情境:', specifiedScenario);
+                selectedScenario = specifiedScenario;
+            } else {
+                selectedScenario = scenarios[Math.floor(Math.random() * scenarios.length)];
+                console.log('選擇隨機情境:', selectedScenario);
+            }
+
+            const initialMessage = createInitialMessage(selectedScenario, selectedPersonality);
+            const response = await generateChatResponse([{ role: "user", content: initialMessage }]);
+
+            if (!response) {
+                throw new Error('OpenAI API 未返回有效回應');
+            }
+
+            const parsedResponse = parseInitialResponse(response);
+            if (!parsedResponse) {
+                console.error('AI 回應解析失敗，原始回應:', response);
+                return res.status(500).json({
+                    success: false,
+                    message: 'AI 回應解析失敗',
+                    details: { response }
+                });
+            }
+
+            scenario = parsedResponse.scenario;
         }
-
-        const initialMessage = createInitialMessage(selectedScenario, selectedPersonality);
-        const response = await generateChatResponse([{ role: "user", content: initialMessage }]);
-
-        if (!response) {
-            throw new Error('OpenAI API 未返回有效回應');
-        }
-
-        const parsedResponse = parseInitialResponse(response);
-        if (!parsedResponse) {
-            console.error('AI 回應解析失敗，原始回應:', response);
-            return res.status(500).json({
-                success: false,
-                message: 'AI 回應解析失敗',
-                details: { response }
-            });
-        }
-
-        const { scenario } = parsedResponse;
 
         // 對話歷史從空白開始，學生先開口。
         // 計時從情境載入完成、正式可開始作答的時間點起算。
-        const challengeMode = difficulty === '挑戰';
+        const challengeMode = effectiveDifficulty === '挑戰';
         const startedAt = Date.now();
         const timeLimitSeconds = getPracticeTimeLimitSeconds(challengeMode);
         const deadlineAt = startedAt + (timeLimitSeconds * 1000);

@@ -1229,7 +1229,7 @@ function displayPracticeDetails(practice, nonverbalData) {
     retryButton.style.padding = '15px 40px';
     retryButton.style.fontWeight = 'bold';
     retryButton.addEventListener('click', async () => {
-        await retryPractice(practice._id, practice.scenario);
+        await retryPractice(practice._id);
     });
     
     retryButtonContainer.appendChild(retryButton);
@@ -1314,29 +1314,84 @@ async function deletePractice(practiceId) {
     }
 }
 
-// 重新練習
-async function retryPractice(practiceId, scenario) {
+// 將重新練習的固定設定同步回畫面與目前執行狀態。
+// 非語言練習會強制使用語音輸入，與一般新練習的規則一致。
+function applyRetryPracticeSettings(practice) {
+    if (!practice) return;
+
+    if (techniqueSelect && practice.technique) techniqueSelect.value = practice.technique;
+    if (difficultySelect && practice.difficulty) difficultySelect.value = practice.difficulty;
+
+    const nonverbalEnabled = Boolean(practice.isNonverbalEnabled);
+    isNonverbalEnabled = nonverbalEnabled;
+    if (enableNonverbalDetection) enableNonverbalDetection.checked = nonverbalEnabled;
+
+    if (nonverbalEnabled) {
+        const voiceRadio = document.querySelector('input[name="inputMethod"][value="voice"]');
+        if (voiceRadio) voiceRadio.checked = true;
+        if (textInputLabel) textInputLabel.style.display = 'none';
+        if (voiceInputControls) voiceInputControls.style.display = 'block';
+        if (textInputControls) textInputControls.style.display = 'none';
+    } else {
+        if (textInputLabel) textInputLabel.style.display = 'inline-block';
+    }
+}
+
+// 重新練習：沿用原練習的技巧、難度、完整情境與非語言偵測設定。
+async function retryPractice(practiceId) {
     try {
-            const response = await fetchWithAuth(`/api/practice/practices/${practiceId}/retry`, {
+      const response = await fetchWithAuth(`/api/practice/practices/${practiceId}/retry`, {
         method: 'POST',
         headers: {
-                    'Content-Type': 'application/json'
+          'Content-Type': 'application/json'
         }
       });
-      
+
       if (!response.ok) {
-        throw new Error('重新練習請求失敗');
+        let message = '重新練習請求失敗';
+        try {
+          const errorData = await response.json();
+          message = errorData.message || message;
+        } catch (_) {}
+        throw new Error(message);
       }
-      
+
       const data = await response.json();
-      
+
       if (data.success && data.practice && data.practice._id) {
         currentPracticeId = data.practice._id;
         localStorage.setItem('currentPracticeId', data.practice._id);
-        
-        await startDialogue(data.practice._id, data.practice.scenario);
+
+        // 從已完成紀錄直接重做時，先清掉上一筆分析/非語言結果，避免舊結果留在新練習畫面。
+        clearAnalysis();
+        resetCountdown();
+        const analysisDisplay = document.getElementById('analysisDisplay');
+        if (analysisDisplay) analysisDisplay.style.display = 'none';
+        const nonverbalDisplayPanel = document.getElementById('nonverbalDataDisplay');
+        if (nonverbalDisplayPanel) {
+          nonverbalDisplayPanel.style.display = 'none';
+          const nonverbalDataContent = document.getElementById('nonverbalDataContent');
+          if (nonverbalDataContent) nonverbalDataContent.innerHTML = '';
+        }
+        const existingRetryContainer = document.querySelector('.retry-button-container');
+        if (existingRetryContainer) existingRetryContainer.remove();
+        const recordControlsPanel = document.querySelector('.record-controls.panel');
+        if (recordControlsPanel) recordControlsPanel.style.display = 'block';
+        if (practiceBudgetDisplay) practiceBudgetDisplay.style.display = 'none';
+        if (window.nonverbalAnalysis && nonverbalAnalysisActive) {
+          try { window.nonverbalAnalysis.stop(); } catch (e) { console.warn('停止上一筆非語言分析失敗:', e); }
+          nonverbalAnalysisActive = false;
+        }
+
+        applyRetryPracticeSettings(data.practice);
+
+        await startDialogue(data.practice._id, data.practice.scenario, {
+          technique: data.practice.technique,
+          difficulty: data.practice.difficulty,
+          reuseExactScenario: true
+        });
         await loadPractices();
-        alert('已創建重新練習！');
+        alert('已使用原設定重新開始練習！');
       } else {
         throw new Error(data.message || '創建重新練習失敗');
       }
@@ -1839,10 +1894,45 @@ async function stopRealtimeVoiceSession({ showManualControls = false } = {}) {
 async function fallbackToManualVoice(error) {
     console.warn('Voice 2.0 無法啟動，切回手動錄音:', error);
     realtimeFallbackActive = true;
+
+    // Realtime 失敗後，明確恢復成舊版手動語音模式。
+    // 這裡刻意不自動啟動非語言偵測；手動模式仍以「開始錄音」作為
+    // 同步開始錄音與非語言偵測的時間點，避免兩份資料時間軸錯開。
     await stopRealtimeVoiceSession({ showManualControls: true });
-    if (startRecordBtn) startRecordBtn.disabled = false;
-    if (stopRecordBtn) stopRecordBtn.disabled = true;
-    recordStatus.textContent = `即時語音暫時不可用，已切回手動錄音。${error?.message ? `（${error.message}）` : ''}`;
+
+    const voiceRadio = document.querySelector('input[name="inputMethod"][value="voice"]');
+    if (voiceRadio) voiceRadio.checked = true;
+    if (voiceInputControls) voiceInputControls.style.display = 'block';
+    if (textInputControls) textInputControls.style.display = 'none';
+
+    if (startRecordBtn) {
+        startRecordBtn.style.display = '';
+        startRecordBtn.disabled = false;
+    }
+    if (stopRecordBtn) {
+        stopRecordBtn.style.display = '';
+        stopRecordBtn.disabled = true;
+    }
+
+    if (isNonverbalEnabled) {
+        if (textInputLabel) textInputLabel.style.display = 'none';
+
+        // 若 Realtime 是在連線成功後才中途失敗，非語言偵測可能已在運作。
+        // 切回手動模式時先停止，等使用者按「開始錄音」再由既有流程同步啟動。
+        if (window.nonverbalAnalysis && nonverbalAnalysisActive) {
+            try {
+                window.nonverbalAnalysis.stop();
+            } catch (stopError) {
+                console.warn('切回手動模式時停止非語言偵測失敗:', stopError);
+            }
+            nonverbalAnalysisActive = false;
+        }
+        if (nonverbalWindow) nonverbalWindow.style.display = 'none';
+
+        recordStatus.textContent = `即時語音暫時不可用，已切回手動錄音。按下「開始錄音」後會同步啟動非語言偵測。${error?.message ? `（${error.message}）` : ''}`;
+    } else {
+        recordStatus.textContent = `即時語音暫時不可用，已切回手動錄音。${error?.message ? `（${error.message}）` : ''}`;
+    }
 }
 
 async function startRealtimeVoiceSession(practiceId) {
@@ -1968,7 +2058,7 @@ async function startRealtimeVoiceSession(practiceId) {
 }
 
 // 開始對話
-async function startDialogue(practiceId, specifiedScenario = null) {
+async function startDialogue(practiceId, specifiedScenario = null, practiceOptions = {}) {
     if (!checkAuthStatus()) return;
     await stopRealtimeVoiceSession();
 
@@ -1990,8 +2080,9 @@ async function startDialogue(practiceId, specifiedScenario = null) {
     if(spinner) spinner.classList.add('spinner-visible');
 
     try {
-        const technique = techniqueSelect.value;
-        const difficulty = difficultySelect.value;
+        const technique = practiceOptions.technique || techniqueSelect.value;
+        const difficulty = practiceOptions.difficulty || difficultySelect.value;
+        const reuseExactScenario = Boolean(practiceOptions.reuseExactScenario);
         dialogueCount = 0; 
 
         if (!technique) throw new Error('請選擇溝通技巧');
@@ -2007,6 +2098,7 @@ async function startDialogue(practiceId, specifiedScenario = null) {
                 difficulty,
                 practiceId,
                 specifiedScenario,
+                reuseExactScenario,
                 characterVoice 
             }),
         });

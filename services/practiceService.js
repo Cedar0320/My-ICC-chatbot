@@ -570,6 +570,7 @@ async function createPractice(userId, newPractice) {
       history: [],
       recordings: [],
       analysis: '',  // 空字串表示尚未完成，有內容表示已完成
+      isNonverbalEnabled: Boolean(newPractice.isNonverbalEnabled),
       isRetry: newPractice.isRetry || false,
       originalPracticeId: newPractice.originalPracticeId || null
     };

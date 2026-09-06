@@ -91,6 +91,14 @@ router.get('/practices', async (req, res) => {
       }
     }
 
+    // 先按建立時間由新到舊排序，再做分頁。
+    // 舊版是在前端收到「每一頁」後才倒序，因此第 1 頁仍然會拿到最舊的一批資料。
+    filteredPractices.sort((a, b) => {
+      const timeA = a && a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b && b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA;
+    });
+
     // 計算分頁
     const totalPractices = filteredPractices.length;
     const pageNum = parseInt(page);
@@ -311,13 +319,34 @@ router.post('/practices/:id/retry', async (req, res) => {
       });
     }
     
-    // 創建新練習，帶有與原始練習相同的技巧、難度和情境
+    // 舊版練習未必有正確保存 isNonverbalEnabled；若歷史中已有非語言資料，
+    // 也視為原練習曾啟用非語言偵測，確保重新練習能沿用相同條件。
+    const historyHasNonverbalData = Array.isArray(originalPractice.history) &&
+      originalPractice.history.some(entry => {
+        if (!entry || entry.role !== '導師' || !entry.nonverbalData) return false;
+        const data = entry.nonverbalData;
+        const hasNumericValue = value =>
+          value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+        return [data.eyeContactRate, data.smileRate, data.openPostureRate, data.gesturesUsed]
+          .some(hasNumericValue) ||
+          (Array.isArray(data.gesturesList) && data.gesturesList.length > 0) ||
+          hasNumericValue(data.dataQuality?.sampleCount) ||
+          hasNumericValue(data.rawData?.eyeContact?.total) ||
+          hasNumericValue(data.rawData?.smile?.total) ||
+          hasNumericValue(data.rawData?.posture?.total);
+      });
+    const originalNonverbalEnabled = Boolean(
+      originalPractice.isNonverbalEnabled || historyHasNonverbalData
+    );
+
+    // 創建新練習，完整沿用原練習設定與同一個情境。
     const newPractice = await createPractice(userId, {
       technique: originalPractice.technique,
       difficulty: originalPractice.difficulty,
-      scenario: originalPractice.scenario,       // 保留相同的情境
+      scenario: originalPractice.scenario,
+      isNonverbalEnabled: originalNonverbalEnabled,
       isRetry: true,
-      originalPracticeId: originalPracticeId     // 記錄原始練習ID
+      originalPracticeId: originalPracticeId
     });
     
     if (!newPractice || !newPractice._id) {
