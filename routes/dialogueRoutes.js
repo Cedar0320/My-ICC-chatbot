@@ -878,6 +878,10 @@ function parseInitialResponse(response) {
 
 // 更新 continue-dialogue 路由，確保在對話完成時更新分析結果
 router.post('/continue-dialogue', async (req, res) => {
+    let rollbackState = null;
+    let rollbackHistoryLength = null;
+    let rollbackCount = null;
+    let rollbackDeadlineGraceUsed = null;
     try {
         const {
             userResponse,
@@ -885,7 +889,8 @@ router.post('/continue-dialogue', async (req, res) => {
             challengeTimeOver,
             allowFinalTurnAfterDeadline = false,
             nonverbalData,
-            characterVoice
+            characterVoice,
+            clientTurnId
         } = req.body;
         const userId = req.user.id;
         console.log("收到請求：", req.body);
@@ -903,6 +908,19 @@ router.post('/continue-dialogue', async (req, res) => {
         if (!dialogueState || !Array.isArray(dialogueState.history)) {
             throw new Error('對話狀態丟失或無效');
         }
+
+        const normalizedClientTurnId = typeof clientTurnId === 'string'
+            ? clientTurnId.trim().slice(0, 100)
+            : '';
+        if (!(dialogueState.completedClientTurns instanceof Map)) {
+            dialogueState.completedClientTurns = new Map();
+        }
+        if (normalizedClientTurnId && dialogueState.completedClientTurns.has(normalizedClientTurnId)) {
+            return res.json(dialogueState.completedClientTurns.get(normalizedClientTurnId));
+        }
+
+        rollbackState = dialogueState;
+        rollbackDeadlineGraceUsed = dialogueState.deadlineGraceUsed;
 
         const getTeacherTurnCount = () => getTeacherTurnCountFromState(dialogueState);
         const turnLimit = PRACTICE_TURN_HARD_LIMIT;
@@ -930,7 +948,7 @@ router.post('/continue-dialogue', async (req, res) => {
 
         // 後端硬限制：即使前端計時器失效，也不能送出第 11 輪或在時間到後開新一輪。
         if (getTeacherTurnCount() >= turnLimit) {
-            return completeDialogueForBudget('turn');
+            return await completeDialogueForBudget('turn');
         }
         const expiredBeforeTurn = Boolean(challengeTimeOver || isDialogueTimeExpired(dialogueState));
         const canUseDeadlineGrace = Boolean(
@@ -941,20 +959,22 @@ router.post('/continue-dialogue', async (req, res) => {
         );
 
         if (expiredBeforeTurn && !canUseDeadlineGrace) {
-            return completeDialogueForBudget('time');
+            return await completeDialogueForBudget('time');
         }
         if (canUseDeadlineGrace) {
             // 只允許硬上限到達當下「已經在說」的那一句完成，避免再開新一輪。
             dialogueState.deadlineGraceUsed = true;
         }
 
-        // 添加導師的回應到對話歷史
+        // 先建立本輪導師訊息，但在 AI 家長成功回覆前不寫入正式歷史。
+        // 這樣 OpenAI 或 DB 暫時失敗時，不會留下只有老師、沒有家長的殘缺輪次。
+        let historyEntry = null;
         if (userResponse && userResponse.trim()) {
             // 驗證並清理非語言數據
             const validatedNonverbalData = validateNonverbalData(nonverbalData);
 
             // 建立歷史記錄項目
-            const historyEntry = {
+            historyEntry = {
                 role: "導師",
                 content: userResponse
             };
@@ -964,8 +984,11 @@ router.post('/continue-dialogue', async (req, res) => {
                 historyEntry.nonverbalData = validatedNonverbalData;
             }
 
-            addToHistory(userId, practiceId, historyEntry);
-            incrementCount(userId, practiceId);
+        } else {
+            return res.status(400).json({
+                success: false,
+                error: '老師回應不可為空'
+            });
         }
 
         const parentPersonality = dialogueState.parentPersonality || '擔心但願意合作：有情緒（焦慮/不安），會提出疑問與顧慮，但願意聽老師說明並討論下一步。';
@@ -1024,7 +1047,7 @@ ${difficultyLevel}
 
         const messages = [
             { role: "system", content: systemMessage },
-            ...dialogueState.history.map(entry => ({
+            ...[...dialogueState.history, historyEntry].map(entry => ({
                 role: entry.role === "家長" ? "assistant" : "user",
                 content: entry.content
             }))
@@ -1035,6 +1058,12 @@ ${difficultyLevel}
             throw new Error('AI 回應為空');
         }
 
+        // AI 回覆成功後才一次提交完整的「老師 + 家長」輪次。
+        // 若後續資料庫寫入或分析失敗，catch 會將這段變更回滾。
+        rollbackHistoryLength = dialogueState.history.length;
+        rollbackCount = dialogueState.count;
+        addToHistory(userId, practiceId, historyEntry);
+        incrementCount(userId, practiceId);
         addToHistory(userId, practiceId, { role: "家長", content: aiResponse });
         incrementCount(userId, practiceId);
 
@@ -1044,7 +1073,7 @@ ${difficultyLevel}
 
         if (reachedTurnLimit || reachedTimeLimit) {
             // 第 10 輪或時間於本輪處理期間到達：保留家長最後一句，再自動分析。
-            return completeDialogueForBudget(reachedTurnLimit ? 'turn' : 'time', aiResponse);
+            return await completeDialogueForBudget(reachedTurnLimit ? 'turn' : 'time', aiResponse);
         }
 
         await updatePractice(userId, practiceId, {
@@ -1053,7 +1082,7 @@ ${difficultyLevel}
         });
 
         // 立即回傳文字，TTS 由前端另行呼叫 /tts 產生
-        res.json({
+        const responsePayload = {
             success: true,
             response: aiResponse,
             practiceId,
@@ -1063,9 +1092,28 @@ ${difficultyLevel}
             deadlineAt: getDialogueDeadlineAt(dialogueState)
                 ? new Date(getDialogueDeadlineAt(dialogueState)).toISOString()
                 : null
-        });
+        };
+
+        if (normalizedClientTurnId) {
+            dialogueState.completedClientTurns.set(normalizedClientTurnId, responsePayload);
+        }
+        rollbackHistoryLength = null;
+        rollbackCount = null;
+        return res.json(responsePayload);
 
     } catch (error) {
+        // 本輪未完整成功時，恢復請求前狀態，避免重試造成歷史與輪數重複。
+        if (rollbackState) {
+            if (rollbackHistoryLength !== null) {
+                rollbackState.history.splice(rollbackHistoryLength);
+            }
+            if (rollbackCount !== null) {
+                rollbackState.count = rollbackCount;
+            }
+            if (rollbackDeadlineGraceUsed !== null) {
+                rollbackState.deadlineGraceUsed = rollbackDeadlineGraceUsed;
+            }
+        }
         console.error('Error in continue-dialogue:', error);
         res.status(500).json({ 
             success: false, 

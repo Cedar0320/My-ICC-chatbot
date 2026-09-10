@@ -108,6 +108,10 @@ let voice2TtsObjectUrls = [];
 // 再透過 Realtime data channel 送 input_audio_buffer.commit。
 const VOICE2_LOCAL_VAD_SILENCE_MS = 1200;
 const VOICE2_LOCAL_VAD_MIN_SPEECH_MS = 180;
+const VOICE2_INITIAL_AUTO_ATTEMPTS = 3;
+const VOICE2_SUBMISSION_TOTAL_ATTEMPTS = 5;
+const VOICE2_MANUAL_RETRY_COOLDOWN_SECONDS = 5;
+const VOICE2_SUBMISSION_RETRY_DELAY_MS = 800;
 let voice2AudioContext = null;
 let voice2VadSource = null;
 let voice2VadAnalyser = null;
@@ -120,6 +124,8 @@ let voice2AboveThresholdSince = 0;
 let voice2NoiseFloor = 0.006;
 let voice2CommitPending = false;
 let voice2CommitTimeout = null;
+let voice2PendingSubmission = null;
+let voice2SubmissionCooldownTimer = null;
 
 // DOM 元素快取
 const techniqueSelect = document.getElementById('techniqueSelect');
@@ -1761,6 +1767,196 @@ async function normalizeVoice2TranscriptToTraditional(text) {
     }
 }
 
+function createVoice2ClientTurnId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    return `voice2-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function waitForVoice2SubmissionRetry(delayMs) {
+    return new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
+async function submitVoice2TranscriptWithRetry(transcript, {
+    clientTurnId = createVoice2ClientTurnId(),
+    showTeacherMessage = true
+} = {}) {
+    let lastResult = null;
+
+    for (let attempt = 1; attempt <= VOICE2_INITIAL_AUTO_ATTEMPTS; attempt++) {
+        if (attempt > 1) {
+            recordStatus.textContent = `AI 家長回覆暫時失敗，正在自動重試（${attempt}/${VOICE2_SUBMISSION_TOTAL_ATTEMPTS}）…`;
+        }
+
+        lastResult = await handleSubmission(transcript, {
+            awaitVoicePlayback: true,
+            clientTurnId,
+            displayTeacherMessage: showTeacherMessage && attempt === 1,
+            suppressErrorRecovery: true
+        });
+
+        if (lastResult?.success || !lastResult?.retryable) {
+            return { ...lastResult, attemptsUsed: attempt };
+        }
+        if (attempt < VOICE2_INITIAL_AUTO_ATTEMPTS) {
+            if (!canResumeVoice2Listening()) {
+                return {
+                    success: false,
+                    retryable: false,
+                    attemptsUsed: attempt,
+                    error: new Error('即時語音工作階段已結束')
+                };
+            }
+            await waitForVoice2SubmissionRetry(VOICE2_SUBMISSION_RETRY_DELAY_MS * attempt);
+        }
+    }
+
+    return { ...lastResult, attemptsUsed: VOICE2_INITIAL_AUTO_ATTEMPTS };
+}
+
+function clearVoice2SubmissionCooldown() {
+    if (voice2SubmissionCooldownTimer) {
+        clearInterval(voice2SubmissionCooldownTimer);
+        voice2SubmissionCooldownTimer = null;
+    }
+}
+
+function canResumeVoice2Listening() {
+    return Boolean(
+        realtimePeerConnection &&
+        realtimeSessionPracticeId === currentPracticeId &&
+        isVoiceInputSelected() &&
+        !realtimeFallbackActive &&
+        !practiceTimeExpired &&
+        turnProgress.count < PRACTICE_TURN_HARD_LIMIT
+    );
+}
+
+function resumeVoice2Listening() {
+    voice2PendingSubmission = null;
+    if (!canResumeVoice2Listening()) return;
+    resetVoice2LocalVadTurn();
+    setRealtimeMicEnabled(true);
+    recordStatus.textContent = '🎙️ 即時語音已開啟，直接說話即可，停下後會自動送出。';
+}
+
+function finishSuccessfulVoice2Submission(result) {
+    if (result?.voicePlaybackSucceeded === false && result?.parentResponse) {
+        showVoice2TtsRetry(result.parentResponse, result.ttsVoice, result.parentMsgId);
+        return;
+    }
+    resumeVoice2Listening();
+}
+
+function showVoice2TtsRetry(parentResponse, voice, messageId) {
+    // 家長文字已成功產生，TTS 失敗不能阻塞下一輪。
+    // 立即恢復收音，重試語音只作為可選功能。
+    voice2PendingSubmission = null;
+    const listeningResumed = canResumeVoice2Listening();
+    if (listeningResumed) {
+        resetVoice2LocalVadTurn();
+        setRealtimeMicEnabled(true);
+    }
+    recordStatus.textContent = '';
+
+    const message = document.createElement('span');
+    message.textContent = listeningResumed
+        ? '家長語音播放失敗，可閱讀文字後繼續回答。🎙️ 即時語音已開啟，直接說話即可。'
+        : '家長文字已收到，但語音播放失敗。';
+    const retryButton = document.createElement('button');
+    retryButton.type = 'button';
+    retryButton.textContent = '重播家長語音';
+    retryButton.style.marginLeft = '8px';
+
+    retryButton.addEventListener('click', async () => {
+        if (realtimeVoiceTurnBusy) return;
+        retryButton.disabled = true;
+        realtimeVoiceTurnBusy = true;
+        recordStatus.textContent = '正在重新產生家長語音…';
+
+        try {
+            const played = await fetchTtsAndPlay(parentResponse, voice, messageId);
+            if (played) {
+                resumeVoice2Listening();
+            } else {
+                showVoice2TtsRetry(parentResponse, voice, messageId);
+            }
+        } finally {
+            realtimeVoiceTurnBusy = false;
+        }
+    });
+
+    recordStatus.append(message, retryButton);
+}
+
+function showVoice2SubmissionRetry(transcript, clientTurnId, error, attemptsUsed = VOICE2_INITIAL_AUTO_ATTEMPTS) {
+    clearVoice2SubmissionCooldown();
+    setRealtimeMicEnabled(false);
+
+    const completedAttempts = Math.min(
+        Math.max(Number(attemptsUsed) || 0, 0),
+        VOICE2_SUBMISSION_TOTAL_ATTEMPTS
+    );
+
+    if (completedAttempts >= VOICE2_SUBMISSION_TOTAL_ATTEMPTS) {
+        voice2PendingSubmission = null;
+        recordStatus.textContent = 'AI 家長已連續 5 次無法回覆，可能是服務暫時異常。這句話未計入對話輪數，請結束目前對話，稍後再重新練習。';
+        return;
+    }
+
+    voice2PendingSubmission = { transcript, clientTurnId, attemptsUsed: completedAttempts };
+
+    recordStatus.textContent = '';
+    const message = document.createElement('span');
+    message.textContent = `AI 家長目前無法回覆${error?.message ? `（${error.message}）` : ''}，你的這句話已保留，目前已嘗試 ${completedAttempts}/${VOICE2_SUBMISSION_TOTAL_ATTEMPTS} 次。`;
+    const retryButton = document.createElement('button');
+    retryButton.type = 'button';
+    retryButton.disabled = true;
+    retryButton.style.marginLeft = '8px';
+
+    let remainingSeconds = VOICE2_MANUAL_RETRY_COOLDOWN_SECONDS;
+    retryButton.textContent = `${remainingSeconds} 秒後可重試`;
+    voice2SubmissionCooldownTimer = setInterval(() => {
+        remainingSeconds -= 1;
+        if (remainingSeconds <= 0) {
+            clearVoice2SubmissionCooldown();
+            retryButton.disabled = false;
+            retryButton.textContent = '重試家長回覆';
+        } else {
+            retryButton.textContent = `${remainingSeconds} 秒後可重試`;
+        }
+    }, 1000);
+
+    retryButton.addEventListener('click', async () => {
+        if (realtimeVoiceTurnBusy || !voice2PendingSubmission) return;
+        clearVoice2SubmissionCooldown();
+        retryButton.disabled = true;
+        realtimeVoiceTurnBusy = true;
+        const nextAttempt = completedAttempts + 1;
+        recordStatus.textContent = `AI 家長正在重新回覆（${nextAttempt}/${VOICE2_SUBMISSION_TOTAL_ATTEMPTS}）…`;
+
+        try {
+            // 前三次已由系統自動完成；按鈕每次只送出一個新請求。
+            const result = await handleSubmission(transcript, {
+                awaitVoicePlayback: true,
+                clientTurnId,
+                displayTeacherMessage: false,
+                suppressErrorRecovery: true
+            });
+            if (result?.success) {
+                finishSuccessfulVoice2Submission(result);
+            } else {
+                showVoice2SubmissionRetry(transcript, clientTurnId, result?.error, nextAttempt);
+            }
+        } finally {
+            realtimeVoiceTurnBusy = false;
+        }
+    });
+
+    recordStatus.append(message, retryButton);
+}
+
 async function handleRealtimeTranscriptionEvent(event) {
     if (!event || !event.type) return;
 
@@ -1829,21 +2025,24 @@ async function handleRealtimeTranscriptionEvent(event) {
         setRealtimeMicEnabled(false);
         recordStatus.textContent = 'AI 家長正在思考…';
 
+        const clientTurnId = createVoice2ClientTurnId();
+        let submissionResult = null;
         try {
-            await handleSubmission(finalTranscript, { awaitVoicePlayback: true });
+            submissionResult = await submitVoice2TranscriptWithRetry(finalTranscript, {
+                clientTurnId,
+                showTeacherMessage: true
+            });
         } finally {
             realtimeVoiceTurnBusy = false;
-            if (
-                realtimePeerConnection &&
-                realtimeSessionPracticeId === currentPracticeId &&
-                isVoiceInputSelected() &&
-                !realtimeFallbackActive &&
-                !practiceTimeExpired &&
-                turnProgress.count < PRACTICE_TURN_HARD_LIMIT
-            ) {
-                resetVoice2LocalVadTurn();
-                setRealtimeMicEnabled(true);
-                recordStatus.textContent = '🎙️ 即時語音已開啟，直接說話即可，停下後會自動送出。';
+            if (submissionResult?.success) {
+                finishSuccessfulVoice2Submission(submissionResult);
+            } else if (canResumeVoice2Listening()) {
+                showVoice2SubmissionRetry(
+                    finalTranscript,
+                    clientTurnId,
+                    submissionResult?.error,
+                    submissionResult?.attemptsUsed
+                );
             }
         }
         return;
@@ -1861,6 +2060,8 @@ async function handleRealtimeTranscriptionEvent(event) {
 async function stopRealtimeVoiceSession({ showManualControls = false } = {}) {
     realtimeVoiceTurnBusy = false;
     voice2CommitPending = false;
+    voice2PendingSubmission = null;
+    clearVoice2SubmissionCooldown();
     clearVoice2CommitTimeout();
     stopVoice2LocalVad();
     realtimeTranscriptByItem.clear();
@@ -2208,8 +2409,8 @@ submitTextBtn.addEventListener('click', async () => {
     try {
         submitTextBtn.disabled = true;
         recordStatus.textContent = '處理中...請稍候';
-        await handleSubmission(text);
-        textInput.value = '';
+        const result = await handleSubmission(text);
+        if (result?.success) textInput.value = '';
     } catch (error) {
         console.error('文字提交錯誤：', error);
         recordStatus.textContent = '發生錯誤：' + error.message;
@@ -2244,7 +2445,9 @@ async function handleSubmission(text, options = {}) {
             throw new Error('提交的文字內容為空');
         }
 
-        updateDialogueDisplay("老師", text);
+        if (options.displayTeacherMessage !== false) {
+            updateDialogueDisplay("老師", text);
+        }
 
         let nonverbalData = null;
         if (isNonverbalEnabled && window.nonverbalAnalysis) {
@@ -2270,14 +2473,18 @@ async function handleSubmission(text, options = {}) {
                 allowFinalTurnAfterDeadline: allowAfterDeadline,
                 inputMethod: document.querySelector('input[name="inputMethod"]:checked').value,
                 nonverbalData: nonverbalData,
-                characterVoice: getSelectedCharacterVoice()
+                characterVoice: getSelectedCharacterVoice(),
+                clientTurnId: options.clientTurnId || null
             })
         });
         if (allowAfterDeadline) practiceAllowFinalTurnAfterDeadline = false;
 
-        if (!response.ok) throw new Error('API 請求失敗');
-
-        const data = await response.json();
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+            const requestError = new Error(data?.error || `API 請求失敗（HTTP ${response.status}）`);
+            requestError.httpStatus = response.status;
+            throw requestError;
+        }
         if (!data) throw new Error('無效的回應數據');
 
         // 更新進度（後端回傳 turnCount/turnLimit）
@@ -2292,15 +2499,18 @@ async function handleSubmission(text, options = {}) {
             if (Number.isFinite(syncedDeadline)) practiceDeadlineAt = syncedDeadline;
         }
 
+        let voicePlaybackSucceeded = true;
+        let parentMsgId = null;
+        let ttsVoice = null;
         if (data.response) {
             // 立即顯示文字，背景產生語音；即使本輪觸發硬上限，也讓家長完成最後回覆。
-            const parentMsgId = `parent-msg-${Date.now()}`;
+            parentMsgId = `parent-msg-${Date.now()}`;
             updateDialogueDisplay("家長", data.response, null, parentMsgId);
-            const ttsVoice = getSelectedCharacterVoice();
+            ttsVoice = getSelectedCharacterVoice();
             const shouldAwaitFinalVoice = Boolean(options.awaitVoicePlayback || data.completed);
             const ttsPromise = fetchTtsAndPlay(data.response, ttsVoice, parentMsgId);
             if (shouldAwaitFinalVoice) {
-                await ttsPromise;
+                voicePlaybackSucceeded = await ttsPromise;
             }
         }
 
@@ -2335,13 +2545,30 @@ async function handleSubmission(text, options = {}) {
         }
 
         currentAccumulatedText = '';
+        return {
+            success: true,
+            data,
+            voicePlaybackSucceeded,
+            parentResponse: data.response || null,
+            parentMsgId,
+            ttsVoice
+        };
         
     } catch (error) {
         console.error('對話提交錯誤:', error);
         recordStatus.textContent = `錯誤：${error.message}`;
-        if (!practiceTimeExpired && turnProgress.count < PRACTICE_TURN_HARD_LIMIT) {
+        if (
+            !options.suppressErrorRecovery &&
+            !practiceTimeExpired &&
+            turnProgress.count < PRACTICE_TURN_HARD_LIMIT
+        ) {
             enableUserInput();
         }
+        return {
+            success: false,
+            error,
+            retryable: !error.httpStatus || error.httpStatus >= 500 || error.httpStatus === 408 || error.httpStatus === 429
+        };
     } finally {
         practiceSubmissionInFlight = false;
         if (practiceTimeExpired && !practiceAutoEndInProgress) {
@@ -2721,7 +2948,7 @@ async function fetchLegacyTtsAndPlay(text, voice, messageId) {
         body: JSON.stringify({ text, voice, practiceId: currentPracticeId })
     });
     const data = await res.json();
-    if (!data.success || !data.audioFilePath) return;
+    if (!data.success || !data.audioFilePath) return false;
 
     stopCurrentAudio();
     currentAudioPlayer = new Audio(data.audioFilePath);
@@ -2731,14 +2958,17 @@ async function fetchLegacyTtsAndPlay(text, voice, messageId) {
         await ended;
     } catch (error) {
         console.warn('自動播放被瀏覽器阻擋:', error);
+        attachAudioReplayButton(messageId, data.audioFilePath);
+        return false;
     }
     attachAudioReplayButton(messageId, data.audioFilePath);
+    return true;
 }
 
 // Voice 2.0：直接讀取 TTS response stream，第一批 MP3 bytes 到達後就開始播放。
 async function fetchTtsAndPlay(text, voice, messageId) {
     try {
-        if (!currentPracticeId) return;
+        if (!currentPracticeId) return false;
 
         const res = await fetchWithAuth('/api/dialogue/tts-stream', {
             method: 'POST',
@@ -2769,8 +2999,9 @@ async function fetchTtsAndPlay(text, voice, messageId) {
                 await ended;
             } catch (error) {
                 console.warn('自動播放被瀏覽器阻擋:', error);
+                return false;
             }
-            return;
+            return true;
         }
 
         stopCurrentAudio();
@@ -2830,12 +3061,14 @@ async function fetchTtsAndPlay(text, voice, messageId) {
         }
 
         URL.revokeObjectURL(streamUrl);
+        return Boolean(playbackSucceeded || !audio.paused);
     } catch (error) {
         console.error('Voice 2.0 TTS 串流失敗，切回舊版 TTS:', error);
         try {
-            await fetchLegacyTtsAndPlay(text, voice, messageId);
+            return await fetchLegacyTtsAndPlay(text, voice, messageId);
         } catch (fallbackError) {
             console.error('舊版 TTS 也失敗:', fallbackError);
+            return false;
         }
     }
 }
