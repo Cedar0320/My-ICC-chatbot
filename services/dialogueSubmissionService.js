@@ -44,9 +44,10 @@ async function handleDialogueSubmission(userId, transcription, practiceId) {
       console.log('Dialogue complete, performing analysis'); // 調試用
       const analysis = await analyzeDialogue(userId, practiceId);
 
-      // 保存歷史到練習紀錄（analysis 和 status 由 analyzeDialogue 內部處理）
+      // 舊版相容路徑也一次保存歷史與分析；analyzeDialogue 只負責生成內容。
       await updatePractice(userId, practiceId, { 
-        history: dialogueState.history
+        history: dialogueState.history,
+        analysis
       });
 
       return {
@@ -103,7 +104,7 @@ async function handleDialogueSubmission(userId, transcription, practiceId) {
       }))
     ];
 
-    console.log('Preparing AI response with messages:', messages); // 調試用
+    console.log('Preparing AI response, message count:', messages.length); // 調試用
 
     // 獲取 AI 回應
     const response = await generateChatResponse(messages);

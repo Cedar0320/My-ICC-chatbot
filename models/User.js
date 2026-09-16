@@ -284,6 +284,11 @@ const UserSchema = new mongoose.Schema({
         type: Boolean,
         default: false
       },
+      parentCharacter: {
+        type: String,
+        enum: ['mother', 'father'],
+        default: 'mother'
+      },
       history: [
         {
           role: {

@@ -22,7 +22,12 @@ let practiceTimeLimitSeconds = 0;
 let practiceTimeExpired = false;
 let practiceAutoEndInProgress = false;
 let practiceSubmissionInFlight = false;
+let submissionRetrySequenceInFlight = false;
 let practiceAllowFinalTurnAfterDeadline = false;
+let practiceStartInProgress = false;
+let practiceSessionActive = false;
+let practiceEndInProgress = false;
+const ANALYSIS_LOADING_STORAGE_KEY = 'commAIAnalysisLoadingPracticeId';
 let mediaRecorder = null;
 let audioChunks = [];
 let dialogueCount = 0;
@@ -92,6 +97,9 @@ let realtimeDataChannel = null;
 let realtimeMicStream = null;
 let realtimeSessionPracticeId = null;
 let realtimeStartingPromise = null;
+let realtimeStartAbortController = null;
+let realtimeStartAttemptId = 0;
+let realtimeStartingAttemptId = 0;
 let realtimeVoiceTurnBusy = false;
 let realtimeProcessedItemIds = new Set();
 let realtimeTranscriptByItem = new Map();
@@ -112,6 +120,12 @@ const VOICE2_INITIAL_AUTO_ATTEMPTS = 3;
 const VOICE2_SUBMISSION_TOTAL_ATTEMPTS = 5;
 const VOICE2_MANUAL_RETRY_COOLDOWN_SECONDS = 5;
 const VOICE2_SUBMISSION_RETRY_DELAY_MS = 800;
+const VOICE2_TTS_REQUEST_TIMEOUT_MS = 45000;
+const VOICE2_TTS_PLAYBACK_TIMEOUT_MS = 90000;
+const VOICE2_MEDIA_SOURCE_TIMEOUT_MS = 10000;
+const VOICE2_DIALOGUE_REQUEST_TIMEOUT_MS = 45000;
+const VOICE2_NORMALIZE_REQUEST_TIMEOUT_MS = 10000;
+const VOICE2_REALTIME_START_TIMEOUT_MS = 30000;
 let voice2AudioContext = null;
 let voice2VadSource = null;
 let voice2VadAnalyser = null;
@@ -126,6 +140,42 @@ let voice2CommitPending = false;
 let voice2CommitTimeout = null;
 let voice2PendingSubmission = null;
 let voice2SubmissionCooldownTimer = null;
+let activeInputMethod = 'voice';
+let pendingInputMethod = null;
+let inputMethodTransitionInProgress = false;
+const inputMethodTurnLocks = new Set();
+let practiceSubmissionTerminalFailure = false;
+let nonverbalRuntimeWarning = '';
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function getSafeMediaUrl(value) {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    try {
+        const url = new URL(value, window.location.origin);
+        return ['http:', 'https:', 'blob:'].includes(url.protocol) ? url.href : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function renderMessagePanel(container, header, content) {
+    if (!container) return;
+    const headerElement = document.createElement('div');
+    headerElement.className = 'message-header';
+    headerElement.textContent = header;
+    const contentElement = document.createElement('div');
+    contentElement.className = 'message-content';
+    contentElement.textContent = String(content ?? '');
+    container.replaceChildren(headerElement, contentElement);
+}
 
 // DOM 元素快取
 const techniqueSelect = document.getElementById('techniqueSelect');
@@ -147,6 +197,76 @@ const inputMethodRadios = document.querySelectorAll('input[name="inputMethod"]')
 const enableNonverbalDetection = document.getElementById('enableNonverbalDetection');
 const nonverbalWindow = document.getElementById('nonverbalWindow');
 const textInputLabel = document.getElementById('textInputLabel');
+
+
+// ==========================================
+// Voice 2.0 v9：練習中 UI State B / State C
+// 只切換 layout class，不重建 Voice / Realtime / MediaStream 元件。
+// ==========================================
+function updatePracticeViewportHeight() {
+    const contentContainer = document.querySelector('.content-container');
+    if (!contentContainer) return;
+    const top = Math.max(0, contentContainer.getBoundingClientRect().top);
+    const available = Math.max(420, window.innerHeight - top);
+    document.documentElement.style.setProperty('--practice-available-height', `${available}px`);
+}
+
+function setPracticeViewMode(mode = 'general') {
+    const workspace = document.getElementById('practiceWorkspace');
+    const mainSection = document.querySelector('.main-section');
+    const pageContainer = document.querySelector('.content-container > .container');
+    const setupPanel = document.getElementById('practiceSetupPanel');
+    const dialogueWithAvatar = document.getElementById('dialogueWithAvatar');
+    const practiceStage = document.getElementById('practiceStage');
+    if (!workspace) return;
+
+    const useNonverbalLayout = mode === 'nonverbal';
+    workspace.classList.add('is-active');
+    workspace.classList.toggle('general-mode', !useNonverbalLayout);
+    workspace.classList.toggle('nonverbal-mode', useNonverbalLayout);
+    workspace.classList.remove('info-collapsed');
+
+    if (mainSection) mainSection.classList.add('practice-active');
+    if (pageContainer) pageContainer.classList.add('practice-session-active');
+    document.body.classList.add('practice-session-running');
+    if (setupPanel) setupPanel.style.display = 'none';
+    if (dialogueWithAvatar) dialogueWithAvatar.style.display = 'grid';
+    if (practiceStage) practiceStage.style.removeProperty('display');
+
+    updatePracticeInfoToggle();
+    updatePracticeViewportHeight();
+    window.dispatchEvent(new Event('resize'));
+}
+
+function updatePracticeInfoToggle() {
+    const workspace = document.getElementById('practiceWorkspace');
+    const toggle = document.getElementById('practiceInfoToggle');
+    if (!workspace || !toggle) return;
+    const collapsed = workspace.classList.contains('info-collapsed');
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.title = collapsed ? '展開情境資訊' : '收合情境資訊';
+    const icon = toggle.querySelector('.practice-info-toggle-icon');
+    if (icon) icon.textContent = collapsed ? '▶' : '◀';
+}
+
+function initPracticeWorkspace() {
+    const workspace = document.getElementById('practiceWorkspace');
+    const toggle = document.getElementById('practiceInfoToggle');
+    if (workspace && toggle) {
+        toggle.addEventListener('click', () => {
+            // State C 左右欄固定，不提供收合；只有 State B 可以收合情境欄。
+            if (!workspace.classList.contains('general-mode')) return;
+            workspace.classList.toggle('info-collapsed');
+            updatePracticeInfoToggle();
+            window.dispatchEvent(new Event('resize'));
+        });
+    }
+    updatePracticeViewportHeight();
+    updatePracticeInfoToggle();
+}
+
+window.addEventListener('resize', updatePracticeViewportHeight);
+initPracticeWorkspace();
 
 // ==========================================
 // 圖表渲染邏輯 (修正 Top-level await 問題)
@@ -241,6 +361,9 @@ async function renderNonverbalProgressChart() {
 
 // 頁面載入後自動渲染進步圖表與初始化
 document.addEventListener('DOMContentLoaded', async () => {
+    const pendingAnalysisPracticeId = sessionStorage.getItem(ANALYSIS_LOADING_STORAGE_KEY);
+    if (pendingAnalysisPracticeId) showAnalysisLoading(true);
+
     // 1. 檢查權限
     if (!checkAuthStatus()) return;
 
@@ -329,8 +452,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             // alert('載入練習詳情失敗，請重新選擇練習'); // 選擇性開啟
             localStorage.removeItem('currentPracticeId');
             currentPracticeId = null;
+        } finally {
+            if (pendingAnalysisPracticeId) {
+                sessionStorage.removeItem(ANALYSIS_LOADING_STORAGE_KEY);
+                showAnalysisLoading(false);
+            }
         }
-    } 
+    } else if (pendingAnalysisPracticeId) {
+        sessionStorage.removeItem(ANALYSIS_LOADING_STORAGE_KEY);
+        showAnalysisLoading(false);
+    }
     
     // 7. 渲染圖表
     setTimeout(() => {
@@ -441,6 +572,122 @@ document.getElementById('logoutButton').addEventListener('click', () => {
 // 非語言偵測與輸入方式控制
 // ==========================================
 
+function setCheckedInputMethod(method) {
+    inputMethodRadios.forEach(radio => {
+        radio.checked = radio.value === method;
+    });
+}
+
+function isInputMethodTransitionBlocked() {
+    return Boolean(
+        inputMethodTurnLocks.size > 0 ||
+        inputMethodTransitionInProgress ||
+        practiceSubmissionInFlight ||
+        submissionRetrySequenceInFlight ||
+        realtimeVoiceTurnBusy ||
+        voice2CommitPending ||
+        voice2PendingSubmission ||
+        voice2LocalSpeechActive ||
+        isRecording ||
+        isWaitingForSubmission
+    );
+}
+
+function isDialogueTurnActivelyProcessing() {
+    return Boolean(
+        inputMethodTurnLocks.size > 0 ||
+        inputMethodTransitionInProgress ||
+        practiceSubmissionInFlight ||
+        submissionRetrySequenceInFlight ||
+        realtimeVoiceTurnBusy ||
+        voice2CommitPending ||
+        voice2LocalSpeechActive ||
+        isRecording ||
+        isWaitingForSubmission
+    );
+}
+
+function disableTurnActionInputs() {
+    if (startRecordBtn) startRecordBtn.disabled = true;
+    if (stopRecordBtn) stopRecordBtn.disabled = true;
+    if (textInput) textInput.disabled = true;
+    if (submitTextBtn) submitTextBtn.disabled = true;
+}
+
+function updateInputMethodSelectorState() {
+    const selector = document.getElementById('inputMethodSelector');
+    if (!selector) return;
+    const locked = isInputMethodTransitionBlocked();
+    selector.classList.toggle('is-turn-locked', locked);
+    selector.setAttribute('aria-busy', String(locked));
+    selector.title = locked
+        ? '目前回合完成並播放完家長語音後會自動套用你的選擇'
+        : '';
+}
+
+function acquireInputMethodTurnLock(reason = 'turn') {
+    const token = Symbol(reason);
+    inputMethodTurnLocks.add(token);
+    updateInputMethodSelectorState();
+    return token;
+}
+
+function releaseInputMethodTurnLock(token) {
+    if (token) inputMethodTurnLocks.delete(token);
+    updateInputMethodSelectorState();
+    if (inputMethodTurnLocks.size === 0) {
+        queueMicrotask(() => { flushPendingInputMethodChange(); });
+    }
+}
+
+async function applyInputMethodChange(method) {
+    if (!['voice', 'text'].includes(method)) return false;
+    if (method === 'text' && isNonverbalEnabled) {
+        pendingInputMethod = null;
+        activeInputMethod = 'voice';
+        setCheckedInputMethod('voice');
+        recordStatus.textContent = '啟用非語言偵測時無法使用文字輸入';
+        return false;
+    }
+
+    inputMethodTransitionInProgress = true;
+    updateInputMethodSelectorState();
+    activeInputMethod = method;
+    setCheckedInputMethod(method);
+
+    try {
+        if (method === 'voice') {
+            if (voiceInputControls) voiceInputControls.style.display = 'block';
+            if (textInputControls) textInputControls.style.display = 'none';
+            if (currentPracticeId && isVoice2DialogueActive()) {
+                await startRealtimeVoiceSession(currentPracticeId);
+            }
+        } else {
+            if (voiceInputControls) voiceInputControls.style.display = 'none';
+            if (textInputControls) textInputControls.style.display = 'block';
+            await stopRealtimeVoiceSession();
+            setVoice2Controls(false);
+            recordStatus.textContent = '';
+        }
+        return true;
+    } finally {
+        inputMethodTransitionInProgress = false;
+        updateInputMethodSelectorState();
+        queueMicrotask(() => { flushPendingInputMethodChange(); });
+    }
+}
+
+async function flushPendingInputMethodChange() {
+    if (!pendingInputMethod || isInputMethodTransitionBlocked() || practiceSubmissionTerminalFailure) return;
+    const nextMethod = pendingInputMethod;
+    pendingInputMethod = null;
+    if (nextMethod === activeInputMethod) {
+        setCheckedInputMethod(activeInputMethod);
+        return;
+    }
+    await applyInputMethodChange(nextMethod);
+}
+
 if (enableNonverbalDetection) {
     enableNonverbalDetection.addEventListener('change', (e) => {
         isNonverbalEnabled = e.target.checked;
@@ -448,6 +695,8 @@ if (enableNonverbalDetection) {
         if (isNonverbalEnabled) {
             const voiceRadio = document.querySelector('input[name="inputMethod"][value="voice"]');
             if (voiceRadio) voiceRadio.checked = true;
+            activeInputMethod = 'voice';
+            pendingInputMethod = null;
 
             if (textInputLabel) textInputLabel.style.display = 'none';
 
@@ -464,32 +713,35 @@ if (enableNonverbalDetection) {
 }
 
 inputMethodRadios.forEach(radio => {
-    radio.addEventListener('change', async (e) => {
-        if (e.target.value === 'voice') {
-            voiceInputControls.style.display = 'block';
-            textInputControls.style.display = 'none';
-            if (isRecording) {
-                stopRecordBtn.click();
-            }
-            if (currentPracticeId && isVoice2DialogueActive()) {
-                await startRealtimeVoiceSession(currentPracticeId);
-            }
-        } else if (e.target.value === 'text') {
-            if (isNonverbalEnabled) {
-                e.preventDefault();
-                const voiceRadio = document.querySelector('input[name="inputMethod"][value="voice"]');
-                if (voiceRadio) voiceRadio.checked = true;
-                recordStatus.textContent = '啟用非語言偵測時無法使用文字輸入';
-                return;
-            }
-            voiceInputControls.style.display = 'none';
-            textInputControls.style.display = 'block';
-            if (isRecording) {
-                stopRecordBtn.click();
-            }
-            await stopRealtimeVoiceSession();
-            setVoice2Controls(false);
+    // 使用 click 而非只監聽 change：回合鎖定時會把勾選狀態復原成目前模式，
+    // 使用者再次點已勾選的模式仍必須能改寫「最後想切換的模式」。
+    radio.addEventListener('click', async (e) => {
+        const requestedMethod = e.target.value;
+        if (requestedMethod === 'text' && isNonverbalEnabled) {
+            setCheckedInputMethod('voice');
+            activeInputMethod = 'voice';
+            pendingInputMethod = null;
+            recordStatus.textContent = '啟用非語言偵測時無法使用文字輸入';
+            return;
         }
+
+        if (isInputMethodTransitionBlocked()) {
+            pendingInputMethod = requestedMethod;
+            setCheckedInputMethod(activeInputMethod);
+            // 等待手動重試時保留狀態列中的按鈕，避免切換提示把它移除。
+            if (!voice2PendingSubmission) {
+                recordStatus.textContent = `AI 家長仍在處理目前回合，完成並播放完語音後會自動切換為${requestedMethod === 'voice' ? '語音' : '文字'}輸入。`;
+            }
+            updateInputMethodSelectorState();
+            return;
+        }
+
+        pendingInputMethod = null;
+        if (requestedMethod === activeInputMethod) {
+            setCheckedInputMethod(activeInputMethod);
+            return;
+        }
+        await applyInputMethodChange(requestedMethod);
     });
 });
 
@@ -708,7 +960,12 @@ async function loadPractices(page = 1) {
     } catch (error) {
         console.error('載入練習失敗:', error);
         const practiceList = document.getElementById('practiceList');
-        if(practiceList) practiceList.innerHTML = '<li class="error-message">載入練習時發生錯誤: ' + error.message + '</li>';
+        if (practiceList) {
+            const item = document.createElement('li');
+            item.className = 'error-message';
+            item.textContent = `載入練習時發生錯誤: ${error.message}`;
+            practiceList.replaceChildren(item);
+        }
         const paginationContainer = document.getElementById('practicesPagination');
         if (paginationContainer) paginationContainer.style.display = 'none';
     }
@@ -798,18 +1055,28 @@ function displayFilteredPractices(practices) {
                 ? (practice.scenario.length > 20 ? practice.scenario.substring(0, 20) + '...' : practice.scenario)
                 : '無情境';
             
-            let titleContent = `${practice.technique || '未知技巧'} - ${practiceDate}`;
+            const title = document.createElement('div');
+            title.className = 'practice-item-title';
+            title.append(document.createTextNode(`${practice.technique || '未知技巧'} - ${practiceDate}`));
             if (practice.isRetry) {
-                titleContent += `<span class="retry-badge">重新練習</span>`;
+                const retryBadge = document.createElement('span');
+                retryBadge.className = 'retry-badge';
+                retryBadge.textContent = '重新練習';
+                title.appendChild(retryBadge);
             }
-            
-            listItem.innerHTML = `
-                <div class="practice-item-title">${titleContent}</div>
-                <div class="practice-item-scenario">${scenarioPreview}</div>
-                <div class="practice-item-badge ${practice.difficulty === '挑戰' ? 'challenge' : 'basic'}">${practice.difficulty === '挑戰' ? '挑戰' : '基礎'}</div>
-            `;
+            const scenario = document.createElement('div');
+            scenario.className = 'practice-item-scenario';
+            scenario.textContent = scenarioPreview;
+            const difficulty = document.createElement('div');
+            difficulty.className = `practice-item-badge ${practice.difficulty === '挑戰' ? 'challenge' : 'basic'}`;
+            difficulty.textContent = practice.difficulty === '挑戰' ? '挑戰' : '基礎';
+            listItem.append(title, scenario, difficulty);
             
             listItem.addEventListener('click', async () => {
+                if (isPracticeNavigationLocked()) {
+                    alert('目前練習仍在進行中，請先結束這次對話，再查看其他練習紀錄。');
+                    return;
+                }
                 document.querySelectorAll('.practice-item').forEach(item => {
                     item.classList.remove('selected');
                 });
@@ -823,6 +1090,10 @@ function displayFilteredPractices(practices) {
             
             deleteButton.addEventListener('click', async (e) => {
                 e.stopPropagation();
+                if (isPracticeNavigationLocked()) {
+                    alert('目前練習仍在進行中，請先結束這次對話，再刪除練習紀錄。');
+                    return;
+                }
                 if (confirm('確認刪除此練習紀錄？')) {
                     await deletePractice(practice._id);
                     await loadPractices();
@@ -840,10 +1111,15 @@ function displayFilteredPractices(practices) {
 
 // 選擇練習
 async function selectPractice(practiceId) {
+    if (isPracticeNavigationLocked()) {
+        alert('目前練習仍在進行中，請先結束這次對話。');
+        return false;
+    }
     currentPracticeId = practiceId;
     localStorage.setItem('currentPracticeId', practiceId);
     await loadPracticeDetails(practiceId);
     await loadRecordingsHistory(practiceId);
+    return true;
 }
 
 // 載入練習詳細資料
@@ -865,10 +1141,14 @@ async function loadPracticeDetails(practiceId) {
     }
 
     if (data.success) {
+        // 快速切換兩筆紀錄時，較慢回來的舊請求不可覆蓋目前畫面。
+        if (String(currentPracticeId || '') !== String(practiceId)) return false;
         displayPracticeDetails(data.practice, nonverbalData);
         await loadFeedbackList(practiceId);
+        return true;
     } else {
         console.error('Failed to load practice details:', data.message);
+        return false;
     }
 }
 
@@ -878,16 +1158,30 @@ function displayPracticeDetails(practice, nonverbalData) {
 
     const techniqueDisplay = document.getElementById('scenarioDisplay');
 
-    techniqueDisplay.innerHTML = `
-        <p><strong>溝通技巧：</strong>${practice.technique}</p>
-        <p><strong>模式：</strong>${practice.difficulty || '簡單'}</p>
-        <p><strong>情境：</strong>${practice.scenario}</p>
-    `;
+    techniqueDisplay.replaceChildren();
+    const parentRoleLabel = practice.parentCharacter === 'father' ? '父親' : '母親';
+    [
+        ['溝通技巧：', practice.technique],
+        ['模式：', practice.difficulty || '簡單'],
+        ['家長角色：', parentRoleLabel],
+        ['情境：', practice.scenario]
+    ].forEach(([label, value]) => {
+        const row = document.createElement('p');
+        const labelElement = document.createElement('strong');
+        labelElement.textContent = label;
+        row.append(labelElement, document.createTextNode(String(value ?? '')));
+        techniqueDisplay.appendChild(row);
+    });
 
     analysisContent.innerHTML = '';
     
     // 檢查練習是否已結束（有分析結果代表已結束）
     const practiceCompleted = !!practice.analysis;
+    const practiceStage = document.getElementById('practiceStage');
+    if (practiceStage) {
+        // 完成紀錄只顯示家長角色文字，不再顯示無互動用途的像素小人。
+        practiceStage.style.display = practiceCompleted ? 'none' : '';
+    }
     
     // 控制分析結果框框的顯示
     const analysisDisplay = document.getElementById('analysisDisplay');
@@ -913,7 +1207,7 @@ function displayPracticeDetails(practice, nonverbalData) {
         // 如果練習進行中，確保 record-controls panel 顯示
         const recordControlsPanel = document.querySelector('.record-controls.panel');
         if (recordControlsPanel) {
-            recordControlsPanel.style.display = 'block';
+            recordControlsPanel.style.removeProperty('display');
         }
     }
     
@@ -942,29 +1236,45 @@ function displayPracticeDetails(practice, nonverbalData) {
 
                 // (A) 處理標題 (對話分析、統計數據等)
                 if (text.match(/^(對話分析|具體修正建議|整體回饋|統計數據|逐句教練|逐句修正|示範改寫)[：:]?/)) {
-                    // 加上左邊框裝飾，讓標題更明顯
-                    paragraphElement.innerHTML = `<h4 style="margin: 15px 0 8px 0; color: #333; border-left: 4px solid #e93ae1; padding-left: 10px;">${text}</h4>`;
+                    const heading = document.createElement('h4');
+                    heading.style.cssText = 'margin: 15px 0 8px 0; color: #333; border-left: 4px solid #e93ae1; padding-left: 10px;';
+                    heading.textContent = text;
+                    paragraphElement.appendChild(heading);
                 }
                 // (B) 處理統計數據列表 (以 - 開頭的行)
                 else if (text.startsWith('-') && (text.includes('眼神') || text.includes('微笑') || text.includes('姿態') || text.includes('手勢'))) {
-                    // 加粗關鍵字 (冒號前的部分)
-                    text = text.replace(/^(.*?):/, '<strong>$1</strong>:');
-                    paragraphElement.innerHTML = `<div style="padding-left: 10px; color: #444;">${text}</div>`;
+                    const detail = document.createElement('div');
+                    detail.style.cssText = 'padding-left: 10px; color: #444;';
+                    const separatorIndex = text.search(/[：:]/);
+                    if (separatorIndex >= 0) {
+                        const key = document.createElement('strong');
+                        key.textContent = text.slice(0, separatorIndex);
+                        detail.append(key, document.createTextNode(`：${text.slice(separatorIndex + 1)}`));
+                    } else {
+                        detail.textContent = text;
+                    }
+                    paragraphElement.appendChild(detail);
                 }
                 // (C) 處理評分項目 (例如：情感表現：D)
                 else if (text.match(/^(情感表現|內容回應|清晰表達|溝通技巧)[：:]/)) {
-                    // 加粗關鍵字，確保呈現為 "項目：分數"
-                    text = text.replace(/^(.*?)[：:]\s*(.*)/, '<strong>$1：</strong>$2');
-                    paragraphElement.innerHTML = text;
+                    const parts = text.split(/[：:]/, 2);
+                    const label = document.createElement('strong');
+                    label.textContent = `${parts[0]}：`;
+                    paragraphElement.append(label, document.createTextNode(text.slice(text.search(/[：:]/) + 1).trimStart()));
                 }
                 // (D) 處理數字列表 (1. xxx)
                 else if (text.match(/^\d+\./)) {
-                    text = text.replace(/^(\d+\.)/, '<strong>$1</strong>');
-                    paragraphElement.innerHTML = `<div style="padding-left: 10px;">${text}</div>`;
+                    const detail = document.createElement('div');
+                    detail.style.paddingLeft = '10px';
+                    const numberMatch = text.match(/^(\d+\.)/);
+                    const number = document.createElement('strong');
+                    number.textContent = numberMatch[1];
+                    detail.append(number, document.createTextNode(text.slice(numberMatch[1].length)));
+                    paragraphElement.appendChild(detail);
                 }
                 // (E) 一般文字
                 else {
-                    paragraphElement.innerHTML = text;
+                    paragraphElement.textContent = text;
                 }
 
                 analysisContent.appendChild(paragraphElement);
@@ -1034,15 +1344,15 @@ function displayPracticeDetails(practice, nonverbalData) {
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
                     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; color: white;">
                         <div style="font-size: 14px; opacity: 0.9;">眼神接觸率</div>
-                        <div style="font-size: 32px; font-weight: bold; margin-top: 5px;">${nonverbalData.summary.averageEyeContactRate}%</div>
+                        <div style="font-size: 32px; font-weight: bold; margin-top: 5px;">${escapeHtml(nonverbalData.summary.averageEyeContactRate)}%</div>
                     </div>
                     <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 20px; border-radius: 10px; color: white;">
                         <div style="font-size: 14px; opacity: 0.9;">微笑率</div>
-                        <div style="font-size: 32px; font-weight: bold; margin-top: 5px;">${nonverbalData.summary.averageSmileRate}%</div>
+                        <div style="font-size: 32px; font-weight: bold; margin-top: 5px;">${escapeHtml(nonverbalData.summary.averageSmileRate)}%</div>
                     </div>
                     <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); padding: 20px; border-radius: 10px; color: white;">
                         <div style="font-size: 14px; opacity: 0.9;">開放姿態率</div>
-                        <div style="font-size: 32px; font-weight: bold; margin-top: 5px;">${nonverbalData.summary.averageOpenPostureRate}%</div>
+                        <div style="font-size: 32px; font-weight: bold; margin-top: 5px;">${escapeHtml(nonverbalData.summary.averageOpenPostureRate)}%</div>
                     </div>
                 </div>
             `;
@@ -1076,29 +1386,31 @@ function displayPracticeDetails(practice, nonverbalData) {
         `;
 
         nonverbalData.details.forEach((d, index) => {
-            const eyeRate = d.nonverbalData.eyeContactRate ?? 0;
-            const smileRate = d.nonverbalData.smileRate ?? 0;
-            const postureRate = d.nonverbalData.openPostureRate ?? 0;
+            const metrics = d.nonverbalData || {};
+            const eyeRate = metrics.eyeContactRate ?? 0;
+            const smileRate = metrics.smileRate ?? 0;
+            const postureRate = metrics.openPostureRate ?? 0;
 
             const getRateBadge = (rate) => {
-                if (rate >= 80) return `<span style="background: #28a745; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${rate}%</span>`;
-                if (rate >= 60) return `<span style="background: #ffc107; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${rate}%</span>`;
-                if (rate >= 40) return `<span style="background: #fd7e14; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${rate}%</span>`;
-                return `<span style="background: #dc3545; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${rate}%</span>`;
+                const safeRate = escapeHtml(rate);
+                if (rate >= 80) return `<span style="background: #28a745; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${safeRate}%</span>`;
+                if (rate >= 60) return `<span style="background: #ffc107; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${safeRate}%</span>`;
+                if (rate >= 40) return `<span style="background: #fd7e14; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${safeRate}%</span>`;
+                return `<span style="background: #dc3545; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">${safeRate}%</span>`;
             };
 
-            const quality = d.nonverbalData.dataQuality
-                ? `${d.nonverbalData.dataQuality.sampleCount} 幀 / ${d.nonverbalData.dataQuality.faceDetectionRate}% 偵測率`
+            const quality = metrics.dataQuality
+                ? `${metrics.dataQuality.sampleCount} 幀 / ${metrics.dataQuality.faceDetectionRate}% 偵測率`
                 : '-';
 
             html += `
                 <tr style="border-bottom: 1px solid #eee; ${index % 2 === 0 ? 'background: #fafafa;' : ''}">
-                    <td style="padding: 12px;">${d.turnNumber}</td>
-                    <td style="padding: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${d.content}</td>
+                    <td style="padding: 12px;">${escapeHtml(d.turnNumber)}</td>
+                    <td style="padding: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(d.content)}</td>
                     <td style="padding: 12px; text-align: center;">${getRateBadge(eyeRate)}</td>
                     <td style="padding: 12px; text-align: center;">${getRateBadge(smileRate)}</td>
                     <td style="padding: 12px; text-align: center;">${getRateBadge(postureRate)}</td>
-                    <td style="padding: 12px; font-size: 12px; color: #666;">${quality}</td>
+                    <td style="padding: 12px; font-size: 12px; color: #666;">${escapeHtml(quality)}</td>
                 </tr>
             `;
         });
@@ -1115,7 +1427,7 @@ function displayPracticeDetails(practice, nonverbalData) {
         // 繪製趨勢圖表
         setTimeout(() => {
             const canvas = document.getElementById('nonverbalTrendChart');
-            if (canvas) {
+            if (canvas && typeof Chart === 'function') {
                 const ctx = canvas.getContext('2d');
                 new Chart(ctx, {
                     type: 'line',
@@ -1124,21 +1436,21 @@ function displayPracticeDetails(practice, nonverbalData) {
                         datasets: [
                             {
                                 label: '眼神接觸率',
-                                data: nonverbalData.details.map(d => d.nonverbalData.eyeContactRate ?? 0),
+                                data: nonverbalData.details.map(d => d.nonverbalData?.eyeContactRate ?? 0),
                                 borderColor: '#667eea',
                                 backgroundColor: 'rgba(102, 126, 234, 0.1)',
                                 tension: 0.4
                             },
                             {
                                 label: '微笑率',
-                                data: nonverbalData.details.map(d => d.nonverbalData.smileRate ?? 0),
+                                data: nonverbalData.details.map(d => d.nonverbalData?.smileRate ?? 0),
                                 borderColor: '#f5576c',
                                 backgroundColor: 'rgba(245, 87, 108, 0.1)',
                                 tension: 0.4
                             },
                             {
                                 label: '開放姿態率',
-                                data: nonverbalData.details.map(d => d.nonverbalData.openPostureRate ?? 0),
+                                data: nonverbalData.details.map(d => d.nonverbalData?.openPostureRate ?? 0),
                                 borderColor: '#4facfe',
                                 backgroundColor: 'rgba(79, 172, 254, 0.1)',
                                 tension: 0.4
@@ -1195,7 +1507,8 @@ function displayPracticeDetails(practice, nonverbalData) {
 
     if (practice.history && Array.isArray(practice.history)) {
         practice.history.forEach((entry) => {
-            const dialogueKey = `${entry.role}-${entry.content.substring(0, 50)}`;
+            const entryContent = String(entry.content ?? '');
+            const dialogueKey = `${entry.role}-${entryContent.substring(0, 50)}`;
             if (displayedDialogues.has(dialogueKey)) return;
             displayedDialogues.add(dialogueKey);
             
@@ -1204,13 +1517,15 @@ function displayPracticeDetails(practice, nonverbalData) {
             
             const messageHeader = document.createElement('div');
             messageHeader.className = 'message-header';
-            messageHeader.innerHTML = `<strong>${entry.role === '家長' ? '👨‍👩‍👧‍👦 家長' : '👨‍🏫 導師'}:</strong>`;
+            const messageHeaderLabel = document.createElement('strong');
+            messageHeaderLabel.textContent = `${entry.role === '家長' ? '👨‍👩‍👧‍👦 家長' : '👨‍🏫 導師'}:`;
+            messageHeader.appendChild(messageHeaderLabel);
             
             const messageContent = document.createElement('div');
             messageContent.className = 'message-content';
             messageContent.style.marginBottom = '20px';
             messageContent.style.paddingLeft = '20px';
-            messageContent.textContent = entry.content;
+            messageContent.textContent = entryContent;
             
             messageContainer.appendChild(messageHeader);
             messageContainer.appendChild(messageContent);
@@ -1218,40 +1533,40 @@ function displayPracticeDetails(practice, nonverbalData) {
         });
     }
 
-    // 重新練習按鈕 - 放在最下面
+    // v9：重新練習只屬於 State D（已有分析結果的完成練習）。
     const existingRetryContainer = document.querySelector('.retry-button-container');
     if (existingRetryContainer) existingRetryContainer.remove();
-    
-    const retryButtonContainer = document.createElement('div');
-    retryButtonContainer.className = 'retry-button-container';
-    retryButtonContainer.style.textAlign = 'center';
-    retryButtonContainer.style.marginTop = '30px';
-    
-    const retryButton = document.createElement('button');
-    retryButton.textContent = '重新練習';
-    retryButton.className = 'retry-main-btn';
-    // 加大按鈕和字體
-    retryButton.style.fontSize = '20px';
-    retryButton.style.padding = '15px 40px';
-    retryButton.style.fontWeight = 'bold';
-    retryButton.addEventListener('click', async () => {
-        await retryPractice(practice._id);
-    });
-    
-    retryButtonContainer.appendChild(retryButton);
-    
-    // 決定放置位置：如果有非語言分析區塊且顯示中，就放在它後面；否則放在分析結果框框後面
-    let insertAfterElement;
-    if (nonverbalDisplayPanel && nonverbalDisplayPanel.style.display !== 'none') {
-        insertAfterElement = nonverbalDisplayPanel;
-    } else {
-        insertAfterElement = analysisDisplay;
-    }
-    
-    if (insertAfterElement.nextSibling) {
-        insertAfterElement.parentNode.insertBefore(retryButtonContainer, insertAfterElement.nextSibling);
-    } else {
-        insertAfterElement.parentNode.appendChild(retryButtonContainer);
+
+    if (practiceCompleted) {
+        const retryButtonContainer = document.createElement('div');
+        retryButtonContainer.className = 'retry-button-container';
+        retryButtonContainer.style.textAlign = 'center';
+        retryButtonContainer.style.marginTop = '30px';
+
+        const retryButton = document.createElement('button');
+        retryButton.textContent = '重新練習';
+        retryButton.className = 'retry-main-btn';
+        retryButton.style.fontSize = '20px';
+        retryButton.style.padding = '15px 40px';
+        retryButton.style.fontWeight = 'bold';
+        retryButton.addEventListener('click', async () => {
+            await retryPractice(practice._id);
+        });
+
+        retryButtonContainer.appendChild(retryButton);
+
+        let insertAfterElement;
+        if (nonverbalDisplayPanel && nonverbalDisplayPanel.style.display !== 'none') {
+            insertAfterElement = nonverbalDisplayPanel;
+        } else {
+            insertAfterElement = analysisDisplay;
+        }
+
+        if (insertAfterElement.nextSibling) {
+            insertAfterElement.parentNode.insertBefore(retryButtonContainer, insertAfterElement.nextSibling);
+        } else {
+            insertAfterElement.parentNode.appendChild(retryButtonContainer);
+        }
     }
 }
 
@@ -1259,6 +1574,7 @@ function displayPracticeDetails(practice, nonverbalData) {
 async function createPractice() {
     const technique = techniqueSelect.value;
     const difficulty = difficultySelect.value;
+    const parentCharacter = getSelectedParentCharacter();
     // 確保這裡抓到了當前 checkbox 的狀態
     const nonverbalEnabled = document.getElementById('enableNonverbalDetection').checked;
 
@@ -1276,6 +1592,7 @@ async function createPractice() {
             body: JSON.stringify({ 
                 technique, 
                 difficulty, 
+                parentCharacter,
                 isNonverbalEnabled: nonverbalEnabled // 確保這行有傳給後端儲存
             })
           });
@@ -1298,6 +1615,10 @@ async function createPractice() {
 
 // 刪除練習
 async function deletePractice(practiceId) {
+    if (isPracticeNavigationLocked()) {
+        alert('目前練習仍在進行中，請先結束這次對話。');
+        return false;
+    }
     try {
         const response = await fetchWithAuth(`/api/practice/practices/${practiceId}`, {
             method: 'DELETE',
@@ -1312,12 +1633,14 @@ async function deletePractice(practiceId) {
             }
             // 不要 reload，重新呼叫 loadPractices 體驗較好，但照舊碼邏輯：
             location.reload(); 
+            return true;
         } else {
             console.error('刪除練習失敗:', data.message);
         }
     } catch (error) {
         console.error('刪除練習時發生錯誤:', error);
     }
+    return false;
 }
 
 // 將重新練習的固定設定同步回畫面與目前執行狀態。
@@ -1327,6 +1650,12 @@ function applyRetryPracticeSettings(practice) {
 
     if (techniqueSelect && practice.technique) techniqueSelect.value = practice.technique;
     if (difficultySelect && practice.difficulty) difficultySelect.value = practice.difficulty;
+    const characterSelect = document.getElementById('characterSelect');
+    const parentCharacter = practice.parentCharacter === 'father' ? 'father' : 'mother';
+    if (characterSelect) characterSelect.value = parentCharacter;
+    if (window.npcAvatarController) {
+        window.npcAvatarController.setCharacter(parentCharacter);
+    }
 
     const nonverbalEnabled = Boolean(practice.isNonverbalEnabled);
     isNonverbalEnabled = nonverbalEnabled;
@@ -1335,6 +1664,8 @@ function applyRetryPracticeSettings(practice) {
     if (nonverbalEnabled) {
         const voiceRadio = document.querySelector('input[name="inputMethod"][value="voice"]');
         if (voiceRadio) voiceRadio.checked = true;
+        activeInputMethod = 'voice';
+        pendingInputMethod = null;
         if (textInputLabel) textInputLabel.style.display = 'none';
         if (voiceInputControls) voiceInputControls.style.display = 'block';
         if (textInputControls) textInputControls.style.display = 'none';
@@ -1345,6 +1676,12 @@ function applyRetryPracticeSettings(practice) {
 
 // 重新練習：沿用原練習的技巧、難度、完整情境與非語言偵測設定。
 async function retryPractice(practiceId) {
+    if (isPracticeNavigationLocked()) {
+      alert('目前已有練習正在開始或進行，請先結束後再重新練習。');
+      return false;
+    }
+    practiceStartInProgress = true;
+    if (startPracticeBtn) startPracticeBtn.disabled = true;
     try {
       const response = await fetchWithAuth(`/api/practice/practices/${practiceId}/retry`, {
         method: 'POST',
@@ -1382,7 +1719,7 @@ async function retryPractice(practiceId) {
         const existingRetryContainer = document.querySelector('.retry-button-container');
         if (existingRetryContainer) existingRetryContainer.remove();
         const recordControlsPanel = document.querySelector('.record-controls.panel');
-        if (recordControlsPanel) recordControlsPanel.style.display = 'block';
+        if (recordControlsPanel) recordControlsPanel.style.removeProperty('display');
         if (practiceBudgetDisplay) practiceBudgetDisplay.style.display = 'none';
         if (window.nonverbalAnalysis && nonverbalAnalysisActive) {
           try { window.nonverbalAnalysis.stop(); } catch (e) { console.warn('停止上一筆非語言分析失敗:', e); }
@@ -1391,19 +1728,25 @@ async function retryPractice(practiceId) {
 
         applyRetryPracticeSettings(data.practice);
 
-        await startDialogue(data.practice._id, data.practice.scenario, {
+        const started = await startDialogue(data.practice._id, data.practice.scenario, {
           technique: data.practice.technique,
           difficulty: data.practice.difficulty,
           reuseExactScenario: true
         });
+        if (!started) return false;
         await loadPractices();
         alert('已使用原設定重新開始練習！');
+        return true;
       } else {
         throw new Error(data.message || '創建重新練習失敗');
       }
     } catch (error) {
       console.error('重新練習失敗:', error);
       alert('重新練習失敗: ' + error.message);
+      return false;
+    } finally {
+      practiceStartInProgress = false;
+      if (startPracticeBtn && !practiceSessionActive) startPracticeBtn.disabled = false;
     }
 }
 
@@ -1416,15 +1759,24 @@ function isVoiceInputSelected() {
     return selected && selected.value === 'voice';
 }
 
+function isPracticeNavigationLocked() {
+    return practiceStartInProgress || practiceSessionActive || practiceEndInProgress;
+}
+
 function isVoice2DialogueActive() {
     const dialogueWithAvatar = document.getElementById('dialogueWithAvatar');
-    return Boolean(dialogueWithAvatar && window.getComputedStyle(dialogueWithAvatar).display !== 'none');
+    return Boolean(
+        practiceSessionActive &&
+        dialogueWithAvatar &&
+        window.getComputedStyle(dialogueWithAvatar).display !== 'none'
+    );
 }
 
 function setVoice2Controls(active) {
     if (!voiceInputControls) return;
     const recordingLimitInfo = voiceInputControls.querySelector('.recording-limit-info');
 
+    // 所有模式只使用 #recordStatus 顯示動態狀態，避免 Realtime 額外出現第二行提示。
     if (active) {
         if (startRecordBtn) startRecordBtn.style.display = 'none';
         if (stopRecordBtn) stopRecordBtn.style.display = 'none';
@@ -1745,11 +2097,14 @@ function waitForRealtimeDataChannelOpen(dataChannel, timeoutMs = 10000) {
 async function normalizeVoice2TranscriptToTraditional(text) {
     const rawText = (text || '').trim();
     if (!rawText || !currentPracticeId) return rawText;
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), VOICE2_NORMALIZE_REQUEST_TIMEOUT_MS);
 
     try {
         const response = await fetchWithAuth('/api/realtime/normalize-transcript', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: abortController.signal,
             body: JSON.stringify({
                 practiceId: currentPracticeId,
                 text: rawText
@@ -1764,6 +2119,8 @@ async function normalizeVoice2TranscriptToTraditional(text) {
         // 繁體化失敗不應中斷練習；最差只回到 Realtime 原始逐字稿。
         console.warn('Voice 2.0 繁體轉換失敗，保留原始逐字稿:', error.message);
         return rawText;
+    } finally {
+        clearTimeout(timeout);
     }
 }
 
@@ -1780,39 +2137,48 @@ function waitForVoice2SubmissionRetry(delayMs) {
 
 async function submitVoice2TranscriptWithRetry(transcript, {
     clientTurnId = createVoice2ClientTurnId(),
-    showTeacherMessage = true
+    showTeacherMessage = true,
+    allowAfterDeadline = false
 } = {}) {
     let lastResult = null;
+    submissionRetrySequenceInFlight = true;
+    updateInputMethodSelectorState();
 
-    for (let attempt = 1; attempt <= VOICE2_INITIAL_AUTO_ATTEMPTS; attempt++) {
-        if (attempt > 1) {
-            recordStatus.textContent = `AI 家長回覆暫時失敗，正在自動重試（${attempt}/${VOICE2_SUBMISSION_TOTAL_ATTEMPTS}）…`;
-        }
-
-        lastResult = await handleSubmission(transcript, {
-            awaitVoicePlayback: true,
-            clientTurnId,
-            displayTeacherMessage: showTeacherMessage && attempt === 1,
-            suppressErrorRecovery: true
-        });
-
-        if (lastResult?.success || !lastResult?.retryable) {
-            return { ...lastResult, attemptsUsed: attempt };
-        }
-        if (attempt < VOICE2_INITIAL_AUTO_ATTEMPTS) {
-            if (!canResumeVoice2Listening()) {
-                return {
-                    success: false,
-                    retryable: false,
-                    attemptsUsed: attempt,
-                    error: new Error('即時語音工作階段已結束')
-                };
+    try {
+        for (let attempt = 1; attempt <= VOICE2_INITIAL_AUTO_ATTEMPTS; attempt++) {
+            if (attempt > 1) {
+                recordStatus.textContent = `AI 家長回覆暫時失敗，正在自動重試（${attempt}/${VOICE2_SUBMISSION_TOTAL_ATTEMPTS}）…`;
             }
-            await waitForVoice2SubmissionRetry(VOICE2_SUBMISSION_RETRY_DELAY_MS * attempt);
-        }
-    }
 
-    return { ...lastResult, attemptsUsed: VOICE2_INITIAL_AUTO_ATTEMPTS };
+            lastResult = await handleSubmission(transcript, {
+                allowAfterDeadline,
+                awaitVoicePlayback: true,
+                clientTurnId,
+                displayTeacherMessage: showTeacherMessage && attempt === 1,
+                suppressErrorRecovery: true
+            });
+
+            if (lastResult?.success || !lastResult?.retryable) {
+                return { ...lastResult, attemptsUsed: attempt };
+            }
+            if (attempt < VOICE2_INITIAL_AUTO_ATTEMPTS) {
+                if (!canContinueVoice2Submission()) {
+                    return {
+                        success: false,
+                        retryable: false,
+                        attemptsUsed: attempt,
+                        error: new Error('目前練習已結束')
+                    };
+                }
+                await waitForVoice2SubmissionRetry(VOICE2_SUBMISSION_RETRY_DELAY_MS * attempt);
+            }
+        }
+
+        return { ...lastResult, attemptsUsed: VOICE2_INITIAL_AUTO_ATTEMPTS };
+    } finally {
+        submissionRetrySequenceInFlight = false;
+        updateInputMethodSelectorState();
+    }
 }
 
 function clearVoice2SubmissionCooldown() {
@@ -1827,10 +2193,27 @@ function canResumeVoice2Listening() {
         realtimePeerConnection &&
         realtimeSessionPracticeId === currentPracticeId &&
         isVoiceInputSelected() &&
+        pendingInputMethod !== 'text' &&
         !realtimeFallbackActive &&
+        !practiceSubmissionTerminalFailure &&
         !practiceTimeExpired &&
         turnProgress.count < PRACTICE_TURN_HARD_LIMIT
     );
+}
+
+function canContinueVoice2Submission() {
+    return Boolean(
+        currentPracticeId &&
+        !practiceSubmissionTerminalFailure &&
+        !practiceAutoEndInProgress &&
+        !practiceTimeExpired &&
+        turnProgress.count < PRACTICE_TURN_HARD_LIMIT
+    );
+}
+
+function getVoice2ReadyStatus() {
+    const base = '🎙️ 即時語音已開啟，直接說話即可，停下後會自動送出。';
+    return nonverbalRuntimeWarning ? `${base} ${nonverbalRuntimeWarning}` : base;
 }
 
 function resumeVoice2Listening() {
@@ -1838,59 +2221,55 @@ function resumeVoice2Listening() {
     if (!canResumeVoice2Listening()) return;
     resetVoice2LocalVadTurn();
     setRealtimeMicEnabled(true);
-    recordStatus.textContent = '🎙️ 即時語音已開啟，直接說話即可，停下後會自動送出。';
+    recordStatus.textContent = getVoice2ReadyStatus();
 }
 
 function finishSuccessfulVoice2Submission(result) {
     if (result?.voicePlaybackSucceeded === false && result?.parentResponse) {
-        showVoice2TtsRetry(result.parentResponse, result.ttsVoice, result.parentMsgId);
+        showVoice2TtsFailure();
         return;
     }
-    resumeVoice2Listening();
+    voice2PendingSubmission = null;
+    if (canResumeVoice2Listening()) {
+        resumeVoice2Listening();
+    } else {
+        enableUserInput();
+        recordStatus.textContent = '';
+    }
 }
 
-function showVoice2TtsRetry(parentResponse, voice, messageId) {
-    // 家長文字已成功產生，TTS 失敗不能阻塞下一輪。
-    // 立即恢復收音，重試語音只作為可選功能。
+function showVoice2TtsFailure() {
+    // 家長文字已成功產生，TTS 失敗不能阻塞下一輪，也不再提供會重新計費的 TTS 重試。
     voice2PendingSubmission = null;
     const listeningResumed = canResumeVoice2Listening();
     if (listeningResumed) {
         resetVoice2LocalVadTurn();
         setRealtimeMicEnabled(true);
+    } else {
+        enableUserInput();
     }
-    recordStatus.textContent = '';
-
-    const message = document.createElement('span');
-    message.textContent = listeningResumed
+    recordStatus.textContent = listeningResumed
         ? '家長語音播放失敗，可閱讀文字後繼續回答。🎙️ 即時語音已開啟，直接說話即可。'
-        : '家長文字已收到，但語音播放失敗。';
-    const retryButton = document.createElement('button');
-    retryButton.type = 'button';
-    retryButton.textContent = '重播家長語音';
-    retryButton.style.marginLeft = '8px';
-
-    retryButton.addEventListener('click', async () => {
-        if (realtimeVoiceTurnBusy) return;
-        retryButton.disabled = true;
-        realtimeVoiceTurnBusy = true;
-        recordStatus.textContent = '正在重新產生家長語音…';
-
-        try {
-            const played = await fetchTtsAndPlay(parentResponse, voice, messageId);
-            if (played) {
-                resumeVoice2Listening();
-            } else {
-                showVoice2TtsRetry(parentResponse, voice, messageId);
-            }
-        } finally {
-            realtimeVoiceTurnBusy = false;
-        }
-    });
-
-    recordStatus.append(message, retryButton);
+        : '家長語音播放失敗，可閱讀文字後繼續回答。';
 }
 
-function showVoice2SubmissionRetry(transcript, clientTurnId, error, attemptsUsed = VOICE2_INITIAL_AUTO_ATTEMPTS) {
+function recoverFromNonRetryableSubmission(result) {
+    voice2PendingSubmission = null;
+    if (canResumeVoice2Listening()) {
+        resumeVoice2Listening();
+    } else {
+        enableUserInput();
+    }
+    recordStatus.textContent = `這句話無法送出：${result?.error?.message || '請檢查輸入內容後再試一次'}`;
+}
+
+function showVoice2SubmissionRetry(
+    transcript,
+    clientTurnId,
+    error,
+    attemptsUsed = VOICE2_INITIAL_AUTO_ATTEMPTS,
+    allowAfterDeadline = false
+) {
     clearVoice2SubmissionCooldown();
     setRealtimeMicEnabled(false);
 
@@ -1901,15 +2280,19 @@ function showVoice2SubmissionRetry(transcript, clientTurnId, error, attemptsUsed
 
     if (completedAttempts >= VOICE2_SUBMISSION_TOTAL_ATTEMPTS) {
         voice2PendingSubmission = null;
-        recordStatus.textContent = 'AI 家長已連續 5 次無法回覆，可能是服務暫時異常。這句話未計入對話輪數，請結束目前對話，稍後再重新練習。';
+        pendingInputMethod = null;
+        practiceSubmissionTerminalFailure = true;
+        disableUserInput();
+        recordStatus.textContent = 'AI 家長連續 5 次無法回覆，可能是服務暫時異常。您的這句話未計入輪數，請結束本次對話，稍後再重新練習。';
         return;
     }
 
     voice2PendingSubmission = { transcript, clientTurnId, attemptsUsed: completedAttempts };
+    updateInputMethodSelectorState();
 
     recordStatus.textContent = '';
     const message = document.createElement('span');
-    message.textContent = `AI 家長目前無法回覆${error?.message ? `（${error.message}）` : ''}，你的這句話已保留，目前已嘗試 ${completedAttempts}/${VOICE2_SUBMISSION_TOTAL_ATTEMPTS} 次。`;
+    message.textContent = `AI 家長目前無法回覆，您的這句話已保留，目前已嘗試 ${completedAttempts}/${VOICE2_SUBMISSION_TOTAL_ATTEMPTS} 次。`;
     const retryButton = document.createElement('button');
     retryButton.type = 'button';
     retryButton.disabled = true;
@@ -1939,6 +2322,7 @@ function showVoice2SubmissionRetry(transcript, clientTurnId, error, attemptsUsed
         try {
             // 前三次已由系統自動完成；按鈕每次只送出一個新請求。
             const result = await handleSubmission(transcript, {
+                allowAfterDeadline,
                 awaitVoicePlayback: true,
                 clientTurnId,
                 displayTeacherMessage: false,
@@ -1946,11 +2330,21 @@ function showVoice2SubmissionRetry(transcript, clientTurnId, error, attemptsUsed
             });
             if (result?.success) {
                 finishSuccessfulVoice2Submission(result);
+            } else if (result?.retryable !== false) {
+                showVoice2SubmissionRetry(
+                    transcript,
+                    clientTurnId,
+                    result?.error,
+                    nextAttempt,
+                    allowAfterDeadline
+                );
             } else {
-                showVoice2SubmissionRetry(transcript, clientTurnId, result?.error, nextAttempt);
+                recoverFromNonRetryableSubmission(result);
             }
         } finally {
             realtimeVoiceTurnBusy = false;
+            updateInputMethodSelectorState();
+            flushPendingInputMethodChange();
         }
     });
 
@@ -1984,12 +2378,16 @@ async function handleRealtimeTranscriptionEvent(event) {
     }
 
     if (event.type === 'conversation.item.input_audio_transcription.completed') {
+        const transcriptionModeLock = acquireInputMethodTurnLock('realtime-transcription-completed');
         clearVoice2CommitTimeout();
         voice2CommitPending = false;
         resetVoice2LocalVadTurn();
 
         const itemId = event.item_id || `item-${Date.now()}`;
-        if (realtimeProcessedItemIds.has(itemId)) return;
+        if (realtimeProcessedItemIds.has(itemId)) {
+            releaseInputMethodTurnLock(transcriptionModeLock);
+            return;
+        }
         realtimeProcessedItemIds.add(itemId);
         realtimeTranscriptByItem.delete(itemId);
 
@@ -1998,19 +2396,22 @@ async function handleRealtimeTranscriptionEvent(event) {
             clearTranscriptionPreview();
             // 本輪沒有文字時，不要讓剛剛的空白錄音片段排隊到下一輪。
             takeNextVoice2SegmentBlob(1500).catch(() => null);
-            if (
-                realtimePeerConnection &&
-                realtimeSessionPracticeId === currentPracticeId &&
-                isVoiceInputSelected() &&
-                !realtimeFallbackActive &&
-                !practiceTimeExpired &&
-                turnProgress.count < PRACTICE_TURN_HARD_LIMIT
-            ) {
+            if (canResumeVoice2Listening()) {
                 setRealtimeMicEnabled(true);
                 recordStatus.textContent = '🎙️ 沒有辨識到內容，請再說一次。';
             }
+            releaseInputMethodTurnLock(transcriptionModeLock);
             return;
         }
+
+        if (realtimeVoiceTurnBusy) {
+            releaseInputMethodTurnLock(transcriptionModeLock);
+            return;
+        }
+        realtimeVoiceTurnBusy = true;
+        const turnModeLock = transcriptionModeLock;
+        setRealtimeMicEnabled(false);
+        recordStatus.textContent = '正在整理你的語音…';
 
         // Realtime 模型有時即使指定 zh-tw 仍會回簡體；在正式送出前用本地
         // OpenCC 統一成台灣繁體。這一步不會再呼叫 OpenAI。
@@ -2020,30 +2421,35 @@ async function handleRealtimeTranscriptionEvent(event) {
         // S3 保存與 AI 對話並行，不再把 S3 放在轉錄關鍵路徑中。
         saveVoice2RecordingForTranscript(finalTranscript);
 
-        if (realtimeVoiceTurnBusy) return;
-        realtimeVoiceTurnBusy = true;
-        setRealtimeMicEnabled(false);
         recordStatus.textContent = 'AI 家長正在思考…';
 
         const clientTurnId = createVoice2ClientTurnId();
+        const allowAfterDeadline = Boolean(practiceAllowFinalTurnAfterDeadline);
         let submissionResult = null;
         try {
             submissionResult = await submitVoice2TranscriptWithRetry(finalTranscript, {
                 clientTurnId,
-                showTeacherMessage: true
+                showTeacherMessage: true,
+                allowAfterDeadline
             });
         } finally {
             realtimeVoiceTurnBusy = false;
             if (submissionResult?.success) {
                 finishSuccessfulVoice2Submission(submissionResult);
-            } else if (canResumeVoice2Listening()) {
+            } else if (submissionResult?.retryable !== false && canContinueVoice2Submission()) {
                 showVoice2SubmissionRetry(
                     finalTranscript,
                     clientTurnId,
                     submissionResult?.error,
-                    submissionResult?.attemptsUsed
+                    submissionResult?.attemptsUsed,
+                    allowAfterDeadline
                 );
+            } else if (canContinueVoice2Submission()) {
+                recoverFromNonRetryableSubmission(submissionResult);
             }
+            releaseInputMethodTurnLock(turnModeLock);
+            updateInputMethodSelectorState();
+            flushPendingInputMethodChange();
         }
         return;
     }
@@ -2057,7 +2463,19 @@ async function handleRealtimeTranscriptionEvent(event) {
     }
 }
 
-async function stopRealtimeVoiceSession({ showManualControls = false } = {}) {
+async function stopRealtimeVoiceSession({ showManualControls = false, invalidateStart = true } = {}) {
+    // 任何使用者主動停止（例如切到文字、結束練習）都要讓尚未完成的
+    // WebRTC 初始化作廢，避免舊的非同步流程稍後對已關閉的 pc 呼叫 setRemoteDescription。
+    if (invalidateStart) {
+        realtimeStartAttemptId += 1;
+        if (realtimeStartAbortController) {
+            try { realtimeStartAbortController.abort(); } catch (_) {}
+            realtimeStartAbortController = null;
+        }
+        realtimeStartingPromise = null;
+        realtimeStartingAttemptId = 0;
+    }
+
     realtimeVoiceTurnBusy = false;
     voice2CommitPending = false;
     voice2PendingSubmission = null;
@@ -2130,53 +2548,107 @@ async function fallbackToManualVoice(error) {
         }
         if (nonverbalWindow) nonverbalWindow.style.display = 'none';
 
-        recordStatus.textContent = `即時語音暫時不可用，已切回手動錄音。按下「開始錄音」後會同步啟動非語言偵測。${error?.message ? `（${error.message}）` : ''}`;
+        const detectionNote = window.nonverbalAnalysis
+            ? '按下「開始錄音」後會同步啟動非語言偵測。'
+            : '非語言模組未載入，本次只能保存語音。';
+        recordStatus.textContent = `即時語音暫時不可用，已切回手動錄音。${detectionNote}${error?.message ? `（${error.message}）` : ''}`;
     } else {
         recordStatus.textContent = `即時語音暫時不可用，已切回手動錄音。${error?.message ? `（${error.message}）` : ''}`;
     }
+    updateInputMethodSelectorState();
+    await flushPendingInputMethodChange();
+}
+
+function isRealtimeStartAttemptCurrent(attemptId, pc = null) {
+    if (attemptId !== realtimeStartAttemptId) return false;
+    if (!isVoiceInputSelected() || !isVoice2DialogueActive()) return false;
+    if (pc) {
+        if (realtimePeerConnection !== pc) return false;
+        if (pc.signalingState === 'closed' || pc.connectionState === 'closed') return false;
+    }
+    return true;
+}
+
+function cleanupAbandonedRealtimeStart(pc, dc, stream) {
+    try { if (dc && dc.readyState !== 'closed') dc.close(); } catch (_) {}
+    try { if (pc && pc.signalingState !== 'closed') pc.close(); } catch (_) {}
+    try { if (stream) stream.getTracks().forEach(track => track.stop()); } catch (_) {}
+
+    if (realtimeDataChannel === dc) realtimeDataChannel = null;
+    if (realtimePeerConnection === pc) {
+        realtimePeerConnection = null;
+        realtimeSessionPracticeId = null;
+    }
+    if (realtimeMicStream === stream) realtimeMicStream = null;
 }
 
 async function startRealtimeVoiceSession(practiceId) {
     if (!VOICE2_REALTIME_ENABLED || !practiceId || !isVoiceInputSelected() || !isVoice2DialogueActive()) return false;
-    if (realtimePeerConnection && realtimeSessionPracticeId === practiceId) {
-        if (isNonverbalEnabled && window.nonverbalAnalysis && !nonverbalAnalysisActive) {
+    if (
+        realtimePeerConnection &&
+        realtimePeerConnection.signalingState !== 'closed' &&
+        realtimeSessionPracticeId === practiceId
+    ) {
+        if (isNonverbalEnabled && !window.nonverbalAnalysis) {
+            nonverbalRuntimeWarning = '⚠️ 非語言模組未載入，本次不會產生非語言分析。';
+        } else if (isNonverbalEnabled && window.nonverbalAnalysis && !nonverbalAnalysisActive) {
             try {
                 if (nonverbalWindow) nonverbalWindow.style.display = 'block';
                 await window.nonverbalAnalysis.start();
                 nonverbalAnalysisActive = true;
             } catch (error) {
                 console.warn('Voice 2.0 非語言分析啟動失敗:', error);
+                nonverbalRuntimeWarning = `⚠️ 非語言偵測未啟動：${error.message}`;
             }
         }
         return true;
     }
     if (realtimeStartingPromise) return realtimeStartingPromise;
 
-    realtimeStartingPromise = (async () => {
+    const attemptId = ++realtimeStartAttemptId;
+    realtimeStartingAttemptId = attemptId;
+    const startAbortController = new AbortController();
+    realtimeStartAbortController = startAbortController;
+    let startNetworkTimeout = null;
+
+    let localPc = null;
+    let localDc = null;
+    let localStream = null;
+
+    const startPromise = (async () => {
         try {
             realtimeFallbackActive = false;
-            await stopRealtimeVoiceSession();
+
+            // 只清理上一個已存在的連線，不讓這個剛建立的 attempt 自己失效。
+            await stopRealtimeVoiceSession({ invalidateStart: false });
+            if (!isRealtimeStartAttemptCurrent(attemptId)) return false;
+
             setVoice2Controls(true);
             recordStatus.textContent = '正在啟動即時語音…';
 
-            const stream = await navigator.mediaDevices.getUserMedia({
+            localStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
                     autoGainControl: true
                 }
             });
-            realtimeMicStream = stream;
+            if (!isRealtimeStartAttemptCurrent(attemptId)) {
+                cleanupAbandonedRealtimeStart(null, null, localStream);
+                return false;
+            }
+            realtimeMicStream = localStream;
 
-            const pc = new RTCPeerConnection();
-            realtimePeerConnection = pc;
+            localPc = new RTCPeerConnection();
+            realtimePeerConnection = localPc;
             realtimeSessionPracticeId = practiceId;
 
-            stream.getAudioTracks().forEach(track => pc.addTrack(track, stream));
+            localStream.getAudioTracks().forEach(track => localPc.addTrack(track, localStream));
 
-            const dc = pc.createDataChannel('oai-events');
-            realtimeDataChannel = dc;
-            dc.addEventListener('message', (messageEvent) => {
+            localDc = localPc.createDataChannel('oai-events');
+            realtimeDataChannel = localDc;
+            localDc.addEventListener('message', (messageEvent) => {
+                if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) return;
                 try {
                     const event = JSON.parse(messageEvent.data);
                     handleRealtimeTranscriptionEvent(event);
@@ -2185,23 +2657,47 @@ async function startRealtimeVoiceSession(practiceId) {
                 }
             });
 
-            pc.addEventListener('connectionstatechange', () => {
-                if (pc.connectionState === 'failed') {
+            localPc.addEventListener('connectionstatechange', () => {
+                if (
+                    localPc.connectionState === 'failed' &&
+                    isRealtimeStartAttemptCurrent(attemptId, localPc) &&
+                    !realtimeFallbackActive
+                ) {
                     fallbackToManualVoice(new Error('Realtime WebRTC 連線失敗'));
                 }
             });
 
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
+            const offer = await localPc.createOffer();
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
+            await localPc.setLocalDescription(offer);
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
 
             // Voice 2.0 v2：先向 CommAI 後端取得短效 Realtime client secret。
             // 真正的 OPENAI_API_KEY 仍只存在伺服器；瀏覽器拿到的是短效憑證。
+            startNetworkTimeout = setTimeout(
+                () => startAbortController.abort(),
+                VOICE2_REALTIME_START_TIMEOUT_MS
+            );
             const tokenResponse = await fetchWithAuth(
                 `/api/realtime/client-secret?practiceId=${encodeURIComponent(practiceId)}`,
-                { method: 'POST' }
+                { method: 'POST', signal: startAbortController.signal }
             );
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
 
             const tokenData = await tokenResponse.json().catch(() => ({}));
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
             if (!tokenResponse.ok || !tokenData.value) {
                 const upstream = tokenData.upstreamStatus ? ` / OpenAI ${tokenData.upstreamStatus}` : '';
                 const detail = tokenData.upstreamMessage ? `：${tokenData.upstreamMessage}` : '';
@@ -2216,10 +2712,19 @@ async function startRealtimeVoiceSession(practiceId) {
                 headers: {
                     Authorization: `Bearer ${tokenData.value}`,
                     'Content-Type': 'application/sdp'
-                }
+                },
+                signal: startAbortController.signal
             });
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
 
             const answerSdp = await sdpResponse.text();
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
             if (!sdpResponse.ok) {
                 let detail = answerSdp;
                 try {
@@ -2229,39 +2734,87 @@ async function startRealtimeVoiceSession(practiceId) {
                 throw new Error(`OpenAI WebRTC 建立失敗 (${sdpResponse.status})${detail ? `：${String(detail).slice(0, 240)}` : ''}`);
             }
 
-            await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-            await waitForRealtimeDataChannelOpen(dc);
+            // 這是切換「語音 → 文字」最容易撞到的競態點；必須在設定 SDP 前再次確認。
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
+            await localPc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
+
+            await waitForRealtimeDataChannelOpen(localDc);
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
 
             startVoice2SegmentRecorder();
             await startVoice2LocalVad();
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
 
-            if (isNonverbalEnabled && window.nonverbalAnalysis && !nonverbalAnalysisActive) {
+            if (isNonverbalEnabled && !window.nonverbalAnalysis) {
+                nonverbalRuntimeWarning = '⚠️ 非語言模組未載入，本次不會產生非語言分析。';
+            } else if (isNonverbalEnabled && window.nonverbalAnalysis && !nonverbalAnalysisActive) {
                 try {
                     if (nonverbalWindow) nonverbalWindow.style.display = 'block';
                     await window.nonverbalAnalysis.start();
+                    if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                        cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                        return false;
+                    }
                     nonverbalAnalysisActive = true;
                 } catch (error) {
                     console.warn('Voice 2.0 非語言分析啟動失敗:', error);
+                    nonverbalRuntimeWarning = `⚠️ 非語言偵測未啟動：${error.message}`;
                 }
             }
 
-            recordStatus.textContent = '🎙️ 即時語音已開啟，直接說話即可，停下後會自動送出。';
+            recordStatus.textContent = getVoice2ReadyStatus();
             return true;
         } catch (error) {
-            await fallbackToManualVoice(error);
+            // 如果使用者在初始化途中切到文字／結束練習，這不是 Realtime 故障，
+            // 不應顯示錯誤、更不應誤觸 fallback；安靜丟棄這個過期 attempt 即可。
+            if (!isRealtimeStartAttemptCurrent(attemptId, localPc)) {
+                cleanupAbandonedRealtimeStart(localPc, localDc, localStream);
+                return false;
+            }
+
+            const reportedError = error?.name === 'AbortError'
+                ? new Error('Realtime 連線逾時，請改用手動錄音或稍後再試')
+                : error;
+            await fallbackToManualVoice(reportedError);
             return false;
         } finally {
-            realtimeStartingPromise = null;
+            if (startNetworkTimeout) clearTimeout(startNetworkTimeout);
+            if (realtimeStartAbortController === startAbortController) {
+                realtimeStartAbortController = null;
+            }
+            if (realtimeStartingAttemptId === attemptId) {
+                realtimeStartingPromise = null;
+                realtimeStartingAttemptId = 0;
+            }
         }
     })();
 
-    return realtimeStartingPromise;
+    realtimeStartingPromise = startPromise;
+    return startPromise;
 }
 
 // 開始對話
 async function startDialogue(practiceId, specifiedScenario = null, practiceOptions = {}) {
-    if (!checkAuthStatus()) return;
+    if (!checkAuthStatus()) return false;
     await stopRealtimeVoiceSession();
+    practiceSessionActive = false;
+    practiceSubmissionTerminalFailure = false;
+    pendingInputMethod = null;
+    nonverbalRuntimeWarning = '';
+    activeInputMethod = isVoiceInputSelected() ? 'voice' : 'text';
 
     const scenarioDisplay = document.getElementById('scenarioDisplay');
     const dialogueDisplay = document.getElementById('dialogueDisplay');
@@ -2288,6 +2841,7 @@ async function startDialogue(practiceId, specifiedScenario = null, practiceOptio
 
         if (!technique) throw new Error('請選擇溝通技巧');
         const characterVoice = getSelectedCharacterVoice();
+        const parentCharacter = getSelectedParentCharacter();
 
         const response = await fetchWithAuth('/api/dialogue/start-dialogue', {
             method: 'POST',
@@ -2300,7 +2854,8 @@ async function startDialogue(practiceId, specifiedScenario = null, practiceOptio
                 practiceId,
                 specifiedScenario,
                 reuseExactScenario,
-                characterVoice 
+                characterVoice,
+                parentCharacter
             }),
         });
 
@@ -2324,10 +2879,7 @@ async function startDialogue(practiceId, specifiedScenario = null, practiceOptio
         const initialCount = (typeof data.turnCount === 'number') ? data.turnCount : 0;
         setTurnProgress(initialCount, PRACTICE_TURN_HARD_LIMIT);
 
-        scenarioDisplay.innerHTML = `
-            <div class="message-header">📝 情境</div>
-            <div class="message-content">${data.scenario || '無法載入情境'}</div>
-        `;
+        renderMessagePanel(scenarioDisplay, '📝 情境', data.scenario || '無法載入情境');
 
         const { task, reminder } = getTaskAndReminder(technique, difficulty);
         const taskDisplay = document.getElementById('taskDisplay');
@@ -2343,9 +2895,14 @@ async function startDialogue(practiceId, specifiedScenario = null, practiceOptio
 
         dialogueDisplay.innerHTML = '';
 
+        // v9：情境生成完成後才切入練習中畫面。
+        // 一般練習使用 State B；啟用非語言時使用 State C。
+        practiceSessionActive = true;
+        setPracticeViewMode(isNonverbalEnabled ? 'nonverbal' : 'general');
+
         // 顯示對話區塊（含錄音按鈕）
         const dialogueWithAvatar = document.getElementById('dialogueWithAvatar');
-        if (dialogueWithAvatar) dialogueWithAvatar.style.display = 'flex';
+        if (dialogueWithAvatar) dialogueWithAvatar.style.display = 'grid';
 
         // 顯示「結束對話」按鈕
         const actionBtns = document.getElementById('dialogueActionBtns');
@@ -2360,16 +2917,17 @@ async function startDialogue(practiceId, specifiedScenario = null, practiceOptio
         if (isVoiceInputSelected()) {
             await startRealtimeVoiceSession(practiceId);
         }
+        return true;
 
     } catch (error) {
+        practiceSessionActive = false;
         console.error('開始對話失敗:', error);
         alert(`錯誤：${error.message}`);
-        scenarioDisplay.innerHTML = `
-            <div class="message error">
-                <div class="message-header">❌ 錯誤 請重試</div>
-                <div class="message-content">${error.message}</div>
-            </div>
-        `;
+        const errorBox = document.createElement('div');
+        errorBox.className = 'message error';
+        renderMessagePanel(errorBox, '❌ 錯誤 請重試', error.message);
+        scenarioDisplay.replaceChildren(errorBox);
+        return false;
     } finally {
         if(spinner) spinner.classList.remove('spinner-visible');
     }
@@ -2379,6 +2937,14 @@ async function startDialogue(practiceId, specifiedScenario = null, practiceOptio
 const endDialogueBtn = document.getElementById('endDialogueBtn');
 if (endDialogueBtn) {
     endDialogueBtn.addEventListener('click', async () => {
+        if (practiceEndInProgress) {
+            recordStatus.textContent = '正在產生分析，請稍候。';
+            return;
+        }
+        if (isDialogueTurnActivelyProcessing()) {
+            recordStatus.textContent = '目前回合仍在處理或播放家長語音，完成後即可結束對話。';
+            return;
+        }
         await endDialogue();
     });
 }
@@ -2409,13 +2975,35 @@ submitTextBtn.addEventListener('click', async () => {
     try {
         submitTextBtn.disabled = true;
         recordStatus.textContent = '處理中...請稍候';
-        const result = await handleSubmission(text);
-        if (result?.success) textInput.value = '';
+        const clientTurnId = createVoice2ClientTurnId();
+        textInput.value = '';
+        const result = await submitVoice2TranscriptWithRetry(text, {
+            clientTurnId,
+            showTeacherMessage: true
+        });
+        if (result?.success) {
+            finishSuccessfulVoice2Submission(result);
+        } else if (result?.retryable !== false && canContinueVoice2Submission()) {
+            showVoice2SubmissionRetry(
+                text,
+                clientTurnId,
+                result?.error,
+                result?.attemptsUsed
+            );
+        } else if (canContinueVoice2Submission()) {
+            recoverFromNonRetryableSubmission(result);
+        }
     } catch (error) {
         console.error('文字提交錯誤：', error);
         recordStatus.textContent = '發生錯誤：' + error.message;
     } finally {
-        if (!practiceTimeExpired && turnProgress.count < PRACTICE_TURN_HARD_LIMIT && !practiceAutoEndInProgress) {
+        if (
+            !practiceTimeExpired &&
+            turnProgress.count < PRACTICE_TURN_HARD_LIMIT &&
+            !practiceAutoEndInProgress &&
+            !voice2PendingSubmission &&
+            !practiceSubmissionTerminalFailure
+        ) {
             submitTextBtn.disabled = false;
         }
     }
@@ -2434,7 +3022,9 @@ async function handleSubmission(text, options = {}) {
         return;
     }
 
+    const inputMethodLock = acquireInputMethodTurnLock('dialogue-submission');
     practiceSubmissionInFlight = true;
+    disableTurnActionInputs();
     try {
         const difficulty = difficultySelect.value;
         isWaitingForSubmission = false;
@@ -2461,25 +3051,33 @@ async function handleSubmission(text, options = {}) {
         const characterVoice = getSelectedCharacterVoice();
         console.log('使用角色語音:', characterVoice);
 
-        const response = await fetchWithAuth('/api/dialogue/continue-dialogue', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                userResponse: text,
-                practiceId: currentPracticeId,
-                challengeTimeOver: false,
-                allowFinalTurnAfterDeadline: allowAfterDeadline,
-                inputMethod: document.querySelector('input[name="inputMethod"]:checked').value,
-                nonverbalData: nonverbalData,
-                characterVoice: getSelectedCharacterVoice(),
-                clientTurnId: options.clientTurnId || null
-            })
-        });
-        if (allowAfterDeadline) practiceAllowFinalTurnAfterDeadline = false;
-
-        const data = await response.json().catch(() => null);
+        const abortController = new AbortController();
+        const timeout = setTimeout(() => abortController.abort(), VOICE2_DIALOGUE_REQUEST_TIMEOUT_MS);
+        let response;
+        let data;
+        try {
+            response = await fetchWithAuth('/api/dialogue/continue-dialogue', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                signal: abortController.signal,
+                body: JSON.stringify({
+                    userResponse: text,
+                    practiceId: currentPracticeId,
+                    challengeTimeOver: false,
+                    allowFinalTurnAfterDeadline: allowAfterDeadline,
+                    inputMethod: document.querySelector('input[name="inputMethod"]:checked').value,
+                    nonverbalData: nonverbalData,
+                    characterVoice: getSelectedCharacterVoice(),
+                    clientTurnId: options.clientTurnId || null
+                })
+            });
+            if (allowAfterDeadline) practiceAllowFinalTurnAfterDeadline = false;
+            data = await response.json().catch(() => null);
+        } finally {
+            clearTimeout(timeout);
+        }
         if (!response.ok) {
             const requestError = new Error(data?.error || `API 請求失敗（HTTP ${response.status}）`);
             requestError.httpStatus = response.status;
@@ -2507,6 +3105,7 @@ async function handleSubmission(text, options = {}) {
             parentMsgId = `parent-msg-${Date.now()}`;
             updateDialogueDisplay("家長", data.response, null, parentMsgId);
             ttsVoice = getSelectedCharacterVoice();
+            recordStatus.textContent = 'AI 家長正在說話…';
             const shouldAwaitFinalVoice = Boolean(options.awaitVoicePlayback || data.completed);
             const ttsPromise = fetchTtsAndPlay(data.response, ttsVoice, parentMsgId);
             if (shouldAwaitFinalVoice) {
@@ -2521,7 +3120,9 @@ async function handleSubmission(text, options = {}) {
             // 讓既有初始化流程從 DB 讀回並顯示分析結果。
             practiceAutoEndInProgress = true;
             if (data.endReason === 'time') practiceTimeExpired = true;
-            analysisContent.innerHTML = `<pre>${data.analysis}</pre>`;
+            const analysisPre = document.createElement('pre');
+            analysisPre.textContent = data.analysis;
+            analysisContent.replaceChildren(analysisPre);
             disableUserInput();
             stopPracticeBudgetTimer();
             updatePracticeBudgetDisplay({ forceEnded: true, endReason: data.endReason });
@@ -2540,7 +3141,8 @@ async function handleSubmission(text, options = {}) {
                     ? `已達第 ${count} 輪，請開始收尾；最多還可回應 ${remainingTurns} 輪。`
                     : '已達第 10 輪，正在結束對話。';
             } else {
-                recordStatus.textContent = `請繼續對話。${getTurnProgressText()}`;
+                // 正常完成一輪時不重複顯示進度提示；進度已固定顯示在上方狀態列。
+                recordStatus.textContent = '';
             }
         }
 
@@ -2574,6 +3176,7 @@ async function handleSubmission(text, options = {}) {
         if (practiceTimeExpired && !practiceAutoEndInProgress) {
             await forceEndDialogueForBudget('time');
         }
+        releaseInputMethodTurnLock(inputMethodLock);
     }
 }
 
@@ -2601,6 +3204,9 @@ startRecordBtn.addEventListener('click', async () => {
                 console.error('非語言分析操作失敗:', error);
                 recordStatus.textContent = '警告: 非語言分析失敗,僅記錄語音';
             }
+        } else if (isNonverbalEnabled) {
+            nonverbalRuntimeWarning = '⚠️ 非語言模組未載入，本次不會產生非語言分析。';
+            recordStatus.textContent = nonverbalRuntimeWarning;
         } else {
             // 沒勾選時確保視窗是隱藏的
             nonverbalWindow.style.display = 'none';
@@ -2653,7 +3259,26 @@ startRecordBtn.addEventListener('click', async () => {
                 if (submissionTimer) clearTimeout(submissionTimer);
 
                 if (practiceTimeExpired && practiceAllowFinalTurnAfterDeadline && currentAccumulatedText.trim().length > 0) {
-                    await handleSubmission(currentAccumulatedText, { allowAfterDeadline: true });
+                    const transcript = currentAccumulatedText;
+                    const clientTurnId = createVoice2ClientTurnId();
+                    const result = await submitVoice2TranscriptWithRetry(transcript, {
+                        clientTurnId,
+                        showTeacherMessage: true,
+                        allowAfterDeadline: true
+                    });
+                    if (result?.success) {
+                        finishSuccessfulVoice2Submission(result);
+                    } else if (result?.retryable !== false && canContinueVoice2Submission()) {
+                        showVoice2SubmissionRetry(
+                            transcript,
+                            clientTurnId,
+                            result?.error,
+                            result?.attemptsUsed,
+                            true
+                        );
+                    } else if (canContinueVoice2Submission()) {
+                        recoverFromNonRetryableSubmission(result);
+                    }
                     currentAccumulatedText = '';
                     isWaitingForSubmission = false;
                     return;
@@ -2671,7 +3296,24 @@ startRecordBtn.addEventListener('click', async () => {
                         clearInterval(submissionTimer);
                         submissionTimer = null;
                         if (currentAccumulatedText.trim().length > 0) {
-                            await handleSubmission(currentAccumulatedText);
+                            const transcript = currentAccumulatedText;
+                            const clientTurnId = createVoice2ClientTurnId();
+                            const result = await submitVoice2TranscriptWithRetry(transcript, {
+                                clientTurnId,
+                                showTeacherMessage: true
+                            });
+                            if (result?.success) {
+                                finishSuccessfulVoice2Submission(result);
+                            } else if (result?.retryable !== false && canContinueVoice2Submission()) {
+                                showVoice2SubmissionRetry(
+                                    transcript,
+                                    clientTurnId,
+                                    result?.error,
+                                    result?.attemptsUsed
+                                );
+                            } else if (canContinueVoice2Submission()) {
+                                recoverFromNonRetryableSubmission(result);
+                            }
                         }
                         currentAccumulatedText = '';
                         isWaitingForSubmission = false;
@@ -2742,7 +3384,18 @@ stopRecordBtn.addEventListener('click', () => {
 
 // 開始練習按鈕監聽
 startPracticeBtn.addEventListener('click', async () => {
+    if (isPracticeNavigationLocked()) {
+        alert('目前已有練習正在開始或進行，請先結束後再開始新的練習。');
+        return;
+    }
+    practiceStartInProgress = true;
+    startPracticeBtn.disabled = true;
     try {
+        practiceSubmissionTerminalFailure = false;
+        voice2PendingSubmission = null;
+        pendingInputMethod = null;
+        clearVoice2SubmissionCooldown();
+        updateInputMethodSelectorState();
         const feedbackList = document.getElementById('feedbackList');
         if(feedbackList) feedbackList.innerHTML = '尚無心得'; 
 
@@ -2758,7 +3411,7 @@ startPracticeBtn.addEventListener('click', async () => {
         // 顯示 record-controls panel（新練習開始時）
         const recordControlsPanel = document.querySelector('.record-controls.panel');
         if (recordControlsPanel) {
-            recordControlsPanel.style.display = 'block';
+            recordControlsPanel.style.removeProperty('display');
         }
 
         // 清空上一次練習的非語言分析結果面板
@@ -2809,63 +3462,58 @@ startPracticeBtn.addEventListener('click', async () => {
         currentPracticeId = practiceId;
         localStorage.setItem('currentPracticeId', practiceId);
 
-        await startDialogue(practiceId);
+        const started = await startDialogue(practiceId);
+        if (!started) return;
 
     } catch (error) {
         console.error('開始練習失敗:', error);
         alert(error.message || '發生錯誤');
+    } finally {
+        practiceStartInProgress = false;
+        if (!practiceSessionActive) startPracticeBtn.disabled = false;
     }
 });
 
+function scrollPracticeDialogueToLatest({ smooth = false } = {}) {
+    const container = document.getElementById('dialogueDisplay');
+    if (!container) return;
+    requestAnimationFrame(() => {
+        if (smooth && typeof container.scrollTo === 'function') {
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        } else {
+            container.scrollTop = container.scrollHeight;
+        }
+    });
+}
+window.scrollPracticeDialogueToLatest = scrollPracticeDialogueToLatest;
+
 function updateDialogueDisplay(speaker, message, audioFilePath = null, messageId = null) {
-    if (!message || !message.trim()) return;
+    const safeMessage = String(message ?? '').trim();
+    if (!safeMessage) return;
 
     const messageDiv = document.createElement('div');
-    const speakerType = speaker.toLowerCase() === 'teacher' || speaker === '老師' ? '老師' : '家長';
+    const speakerValue = String(speaker ?? '');
+    const speakerType = speakerValue.toLowerCase() === 'teacher' || speakerValue === '老師' ? '老師' : '家長';
     messageDiv.className = `message ${speakerType}`;
     if (messageId) messageDiv.id = messageId;
 
     const icon = speakerType === '老師' ? '👩‍🏫' : '👤';
     const alignment = speakerType === '老師' ? 'right' : 'left';
 
-    let messageContent = `
-        <div class="message-header" style="text-align: ${alignment}">
-            ${icon} ${speakerType}
-        </div>
-        <div class="message-content">
-            ${message}
-            ${audioFilePath ? `
-                <button class="play-audio-btn" onclick="playAudio('${audioFilePath}')" title="播放語音">
-                    🔊 播放
-                </button>
-            ` : ''}
-        </div>
-        <div class="message-time" style="text-align: ${alignment}">
-            ${new Date().toLocaleTimeString()}
-        </div>
-    `;
-
-    messageDiv.innerHTML = messageContent;
+    const header = document.createElement('div');
+    header.className = 'message-header';
+    header.style.textAlign = alignment;
+    header.textContent = `${icon} ${speakerType}`;
+    const content = document.createElement('div');
+    content.className = 'message-content';
+    content.appendChild(document.createTextNode(safeMessage));
+    messageDiv.append(header, content);
     
     // 動態添加樣式 (如果還沒有的話)
     if(!document.getElementById('play-audio-style')) {
         const style = document.createElement('style');
         style.id = 'play-audio-style';
         style.textContent = `
-            .play-audio-btn {
-                background-color: #e93ae1;
-                color: white;
-                border: none;
-                border-radius: 15px;
-                padding: 5px 10px;
-                margin-left: 10px;
-                cursor: pointer;
-                font-size: 0.9em;
-                transition: background-color 0.3s;
-            }
-            .play-audio-btn:hover {
-                background-color: #d32f8f;
-            }
             .message-content {
                 display: flex;
                 align-items: center;
@@ -2878,58 +3526,79 @@ function updateDialogueDisplay(speaker, message, audioFilePath = null, messageId
     
     dialogueDisplay.appendChild(messageDiv);
     dialogueCount++;
-    // messageDiv.scrollIntoView({ behavior: 'smooth' }); // 已停用自動滾動
+    // v9：只捲動對話紀錄本身，不拖動整個頁面。
+    scrollPracticeDialogueToLatest();
 }
 
+function bindNpcAnimationToAudio(audio) {
+    if (!audio || audio.__commAiNpcAnimationBound) return audio;
+    audio.__commAiNpcAnimationBound = true;
+
+    const startAnimation = () => {
+        const controller = window.npcAvatarController;
+        if (!controller) return;
+        controller.show();
+        controller.startTalkingAnimation();
+    };
+    const stopAnimation = () => {
+        const controller = window.npcAvatarController;
+        if (controller) controller.stopTalkingAnimation();
+    };
+
+    audio.addEventListener('playing', startAnimation);
+    audio.addEventListener('ended', stopAnimation);
+    audio.addEventListener('pause', stopAnimation);
+    audio.addEventListener('error', stopAnimation);
+    return audio;
+}
+window.bindNpcAnimationToAudio = bindNpcAnimationToAudio;
+
 function playAudio(audioFilePath) {
+    const safeAudioUrl = getSafeMediaUrl(audioFilePath);
+    if (!safeAudioUrl) return;
     stopCurrentAudio();
-    currentAudioPlayer = new Audio(audioFilePath);
+    currentAudioPlayer = bindNpcAnimationToAudio(new Audio(safeAudioUrl));
     currentAudioPlayer.play().catch(error => {
         console.error('播放音頻失敗:', error);
     });
 }
 
-// 幫訊息泡泡補上可重播的語音按鈕
-function attachAudioReplayButton(messageId, audioUrl) {
-    if (!messageId || !audioUrl) return;
-    const msgDiv = document.getElementById(messageId);
-    if (!msgDiv) return;
-    const contentDiv = msgDiv.querySelector('.message-content');
-    if (!contentDiv || contentDiv.querySelector('.play-audio-btn')) return;
-
-    const btn = document.createElement('button');
-    btn.className = 'play-audio-btn';
-    btn.title = '播放語音';
-    btn.textContent = '🔊 播放';
-    btn.onclick = () => playAudio(audioUrl);
-    contentDiv.appendChild(btn);
-}
-
-function waitForAudioEnded(audio, timeoutMs = 180000) {
-    return new Promise(resolve => {
+function waitForAudioEnded(audio, timeoutMs = VOICE2_TTS_PLAYBACK_TIMEOUT_MS) {
+    let cancelWait = () => {};
+    const promise = new Promise(resolve => {
         let done = false;
-        const finish = () => {
+        const finish = (succeeded) => {
             if (done) return;
             done = true;
             clearTimeout(timer);
-            audio.removeEventListener('ended', finish);
-            audio.removeEventListener('error', finish);
-            resolve();
+            audio.removeEventListener('ended', onEnded);
+            audio.removeEventListener('error', onError);
+            resolve(succeeded);
         };
-        const timer = setTimeout(finish, timeoutMs);
-        audio.addEventListener('ended', finish, { once: true });
-        audio.addEventListener('error', finish, { once: true });
+        const onEnded = () => finish(true);
+        const onError = () => finish(false);
+        cancelWait = () => finish(false);
+        const timer = setTimeout(() => finish(false), timeoutMs);
+        audio.addEventListener('ended', onEnded, { once: true });
+        audio.addEventListener('error', onError, { once: true });
     });
+    promise.cancel = cancelWait;
+    return promise;
 }
 
 function appendToSourceBuffer(sourceBuffer, chunk) {
     return new Promise((resolve, reject) => {
         const cleanup = () => {
+            clearTimeout(timeout);
             sourceBuffer.removeEventListener('updateend', onUpdateEnd);
             sourceBuffer.removeEventListener('error', onError);
         };
         const onUpdateEnd = () => { cleanup(); resolve(); };
         const onError = () => { cleanup(); reject(new Error('瀏覽器音訊串流緩衝失敗')); };
+        const timeout = setTimeout(() => {
+            cleanup();
+            reject(new Error('瀏覽器音訊串流緩衝逾時'));
+        }, VOICE2_MEDIA_SOURCE_TIMEOUT_MS);
         sourceBuffer.addEventListener('updateend', onUpdateEnd, { once: true });
         sourceBuffer.addEventListener('error', onError, { once: true });
         try {
@@ -2942,38 +3611,57 @@ function appendToSourceBuffer(sourceBuffer, chunk) {
 }
 
 async function fetchLegacyTtsAndPlay(text, voice, messageId) {
-    const res = await fetchWithAuth('/api/dialogue/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice, practiceId: currentPracticeId })
-    });
-    const data = await res.json();
-    if (!data.success || !data.audioFilePath) return false;
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), VOICE2_TTS_REQUEST_TIMEOUT_MS);
+    let data;
+    try {
+        const res = await fetchWithAuth('/api/dialogue/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, voice, practiceId: currentPracticeId }),
+            signal: abortController.signal
+        });
+        data = await res.json();
+    } finally {
+        clearTimeout(timeout);
+    }
+    if (!data?.success || !data.audioFilePath) return false;
+    const safeAudioUrl = getSafeMediaUrl(data.audioFilePath);
+    if (!safeAudioUrl) return false;
 
     stopCurrentAudio();
-    currentAudioPlayer = new Audio(data.audioFilePath);
+    currentAudioPlayer = bindNpcAnimationToAudio(new Audio(safeAudioUrl));
     const ended = waitForAudioEnded(currentAudioPlayer);
     try {
         await currentAudioPlayer.play();
-        await ended;
+        if (!await ended) {
+            currentAudioPlayer.pause();
+            return false;
+        }
     } catch (error) {
         console.warn('自動播放被瀏覽器阻擋:', error);
-        attachAudioReplayButton(messageId, data.audioFilePath);
         return false;
+    } finally {
+        ended.cancel?.();
     }
-    attachAudioReplayButton(messageId, data.audioFilePath);
     return true;
 }
 
 // Voice 2.0：直接讀取 TTS response stream，第一批 MP3 bytes 到達後就開始播放。
 async function fetchTtsAndPlay(text, voice, messageId) {
+    const ttsInputMethodLock = acquireInputMethodTurnLock('parent-tts');
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), VOICE2_TTS_REQUEST_TIMEOUT_MS);
+    let audioWait = null;
+    let transientStreamUrl = null;
     try {
         if (!currentPracticeId) return false;
 
         const res = await fetchWithAuth('/api/dialogue/tts-stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, voice, practiceId: currentPracticeId })
+            body: JSON.stringify({ text, voice, practiceId: currentPracticeId }),
+            signal: abortController.signal
         });
         if (!res.ok) throw new Error(`TTS stream API 失敗 (${res.status})`);
 
@@ -2989,14 +3677,17 @@ async function fetchTtsAndPlay(text, voice, messageId) {
             const blob = await res.blob();
             const objectUrl = URL.createObjectURL(blob);
             voice2TtsObjectUrls.push(objectUrl);
-            attachAudioReplayButton(messageId, objectUrl);
 
             stopCurrentAudio();
-            currentAudioPlayer = new Audio(objectUrl);
+            currentAudioPlayer = bindNpcAnimationToAudio(new Audio(objectUrl));
             const ended = waitForAudioEnded(currentAudioPlayer);
+            audioWait = ended;
             try {
                 await currentAudioPlayer.play();
-                await ended;
+                if (!await ended) {
+                    currentAudioPlayer.pause();
+                    return false;
+                }
             } catch (error) {
                 console.warn('自動播放被瀏覽器阻擋:', error);
                 return false;
@@ -3007,26 +3698,38 @@ async function fetchTtsAndPlay(text, voice, messageId) {
         stopCurrentAudio();
         const mediaSource = new MediaSource();
         const streamUrl = URL.createObjectURL(mediaSource);
-        const audio = new Audio(streamUrl);
+        transientStreamUrl = streamUrl;
+        const audio = bindNpcAnimationToAudio(new Audio(streamUrl));
         currentAudioPlayer = audio;
         const endedPromise = waitForAudioEnded(audio);
-        const allChunks = [];
+        audioWait = endedPromise;
         let playbackStarted = false;
         let playAttempt = null;
 
+        let mediaSourceOpenTimer;
+        let mediaSourceAbandoned = false;
         await new Promise((resolve, reject) => {
+            mediaSourceOpenTimer = setTimeout(
+                () => {
+                    mediaSourceAbandoned = true;
+                    abortController.abort();
+                    reject(new Error('MediaSource 初始化逾時'));
+                },
+                VOICE2_MEDIA_SOURCE_TIMEOUT_MS
+            );
             mediaSource.addEventListener('sourceopen', async () => {
+                if (mediaSourceAbandoned) return;
                 try {
                     const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
                     const reader = res.body.getReader();
 
                     while (true) {
                         const { done, value } = await reader.read();
+                        if (mediaSourceAbandoned) throw new Error('MediaSource 已停止');
                         if (done) break;
                         if (!value || value.byteLength === 0) continue;
 
                         const chunk = new Uint8Array(value);
-                        allChunks.push(chunk.slice());
                         await appendToSourceBuffer(sourceBuffer, chunk);
 
                         if (!playbackStarted) {
@@ -3041,27 +3744,30 @@ async function fetchTtsAndPlay(text, voice, messageId) {
                     }
 
                     if (mediaSource.readyState === 'open') mediaSource.endOfStream();
+                    clearTimeout(mediaSourceOpenTimer);
                     resolve();
                 } catch (error) {
+                    clearTimeout(mediaSourceOpenTimer);
                     reject(error);
                 }
             }, { once: true });
-            mediaSource.addEventListener('error', () => reject(new Error('MediaSource 初始化失敗')), { once: true });
+            mediaSource.addEventListener('error', () => {
+                mediaSourceAbandoned = true;
+                abortController.abort();
+                clearTimeout(mediaSourceOpenTimer);
+                reject(new Error('MediaSource 初始化失敗'));
+            }, { once: true });
         });
 
-        // 保留完整音訊 Blob，讓同一頁中的「播放」按鈕仍可重播。
-        const replayBlob = new Blob(allChunks, { type: 'audio/mpeg' });
-        const replayUrl = URL.createObjectURL(replayBlob);
-        voice2TtsObjectUrls.push(replayUrl);
-        attachAudioReplayButton(messageId, replayUrl);
-
         const playbackSucceeded = playAttempt ? await playAttempt : false;
-        if (playbackSucceeded || !audio.paused) {
-            await endedPromise;
-        }
+        const playbackCompleted = playbackSucceeded || !audio.paused
+            ? await endedPromise
+            : false;
+        if (!playbackCompleted) audio.pause();
 
         URL.revokeObjectURL(streamUrl);
-        return Boolean(playbackSucceeded || !audio.paused);
+        transientStreamUrl = null;
+        return Boolean((playbackSucceeded || !audio.paused) && playbackCompleted);
     } catch (error) {
         console.error('Voice 2.0 TTS 串流失敗，切回舊版 TTS:', error);
         try {
@@ -3070,6 +3776,13 @@ async function fetchTtsAndPlay(text, voice, messageId) {
             console.error('舊版 TTS 也失敗:', fallbackError);
             return false;
         }
+    } finally {
+        clearTimeout(timeout);
+        audioWait?.cancel?.();
+        if (transientStreamUrl) {
+            try { URL.revokeObjectURL(transientStreamUrl); } catch (_) {}
+        }
+        releaseInputMethodTurnLock(ttsInputMethodLock);
     }
 }
 
@@ -3226,11 +3939,14 @@ function formatTime(seconds) {
 function updateTranscriptionPreview(text) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message 老師 preview';
-    messageDiv.innerHTML = `
-        <div class="message-header" style="text-align: right">👩‍🏫 預覽</div>
-        <div class="message-content">${text}</div>
-        <div class="message-time" style="text-align: right">${new Date().toLocaleTimeString()}</div>
-    `;
+    const header = document.createElement('div');
+    header.className = 'message-header';
+    header.style.textAlign = 'right';
+    header.textContent = '👩‍🏫 預覽';
+    const content = document.createElement('div');
+    content.className = 'message-content';
+    content.textContent = String(text ?? '');
+    messageDiv.append(header, content);
     
     const previousPreview = dialogueDisplay.querySelector('.message.preview');
     if (previousPreview) previousPreview.remove();
@@ -3252,11 +3968,20 @@ function disableUserInput() {
     }
     if(startRecordBtn) startRecordBtn.disabled = true;
     if(stopRecordBtn) stopRecordBtn.disabled = true;
+    if(textInput) textInput.disabled = true;
+    if(submitTextBtn) submitTextBtn.disabled = true;
+    inputMethodRadios.forEach(radio => { radio.disabled = true; });
 }
 
 function enableUserInput() {
+    if (practiceSubmissionTerminalFailure || practiceTimeExpired) return;
     if(startRecordBtn) startRecordBtn.disabled = false;
     if(stopRecordBtn) stopRecordBtn.disabled = true;
+    if(textInput) textInput.disabled = false;
+    if(submitTextBtn) submitTextBtn.disabled = false;
+    inputMethodRadios.forEach(radio => {
+        radio.disabled = Boolean(isNonverbalEnabled && radio.value === 'text');
+    });
 }
 
 // Voice 2.0 成本保護：統一管理基礎／挑戰模式的總時間與輪數 UI。
@@ -3408,10 +4133,13 @@ async function forceEndDialogueForBudget(reason) {
 
 // 手動結束對話並取得分析
 async function endDialogue({ automaticReason = null } = {}) {
+    if (practiceEndInProgress) return false;
     if (!currentPracticeId) {
         recordStatus.textContent = '未找到練習 ID，請先開始練習。';
-        return;
+        return false;
     }
+    practiceEndInProgress = true;
+    if (endDialogueBtn) endDialogueBtn.disabled = true;
 
     // 顯示 loading 覆蓋
     showAnalysisLoading(true);
@@ -3438,10 +4166,16 @@ async function endDialogue({ automaticReason = null } = {}) {
             body: JSON.stringify({ practiceId: currentPracticeId })
         });
 
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.analysis) {
+            throw new Error(data.error || '未獲得分析結果');
+        }
         if (data.analysis) {
-            // 分析已存入 DB，重載頁面後由 init 自動顯示
+            // 分析已存入 DB；跨 reload 保留 loading，直到結果真正渲染完成。
+            practiceSessionActive = false;
+            sessionStorage.setItem(ANALYSIS_LOADING_STORAGE_KEY, String(currentPracticeId));
             window.location.reload();
+            return true;
         } else {
             showAnalysisLoading(false);
             recordStatus.textContent = '未獲得分析結果，請稍後再試。';
@@ -3452,7 +4186,14 @@ async function endDialogue({ automaticReason = null } = {}) {
         recordStatus.textContent = '分析失敗，請重試';
         if (!automaticReason && !practiceTimeExpired && turnProgress.count < PRACTICE_TURN_HARD_LIMIT) {
             enableUserInput();
+            if (isVoiceInputSelected() && !practiceSubmissionTerminalFailure) {
+                await startRealtimeVoiceSession(currentPracticeId);
+            }
         }
+        return false;
+    } finally {
+        practiceEndInProgress = false;
+        if (endDialogueBtn) endDialogueBtn.disabled = false;
     }
 }
 
@@ -3515,6 +4256,11 @@ function getSelectedCharacterVoice() {
     return voiceMap[selectedCharacter] || 'nova';
 }
 
+function getSelectedParentCharacter() {
+    const characterSelect = document.getElementById('characterSelect');
+    return characterSelect?.value === 'father' ? 'father' : 'mother';
+}
+
 async function finalizeCompletedDialogueFromServer() {
     // continue-dialogue 回傳 completed=true 時，後端已經完成分析並寫入 DB，
     // dialogueState 也已刪除。此處只負責關閉前端資源並重新載入結果，
@@ -3538,7 +4284,8 @@ async function finalizeCompletedDialogueFromServer() {
     }
     if (nonverbalWindow) nonverbalWindow.style.display = 'none';
 
-    // 分析已在 DB 中；reload 後沿用既有初始化流程顯示該練習分析。
+    // 分析已在 DB 中；跨 reload 保留 loading，直到結果真正渲染完成。
+    sessionStorage.setItem(ANALYSIS_LOADING_STORAGE_KEY, String(currentPracticeId));
     window.location.reload();
 }
 
@@ -3607,7 +4354,7 @@ async function fixPracticeRoutes() {
         }
         
         const data = await response.json();
-        console.log('API 回應檢查:', data);
+        console.log('API 回應檢查完成:', Boolean(data));
     } catch (error) {
         console.error('API 檢查失敗:', error);
     }
@@ -3639,6 +4386,7 @@ async function loadRecordingsHistory(practiceId) {
         const response = await fetchWithAuth(`/api/audio/recordings?practiceId=${practiceId}`);
 
         const data = await response.json();
+        if (String(currentPracticeId || '') !== String(practiceId)) return;
         const recordingsList = document.getElementById('recordingsList');
         if(!recordingsList) return;
 
@@ -3647,26 +4395,36 @@ async function loadRecordingsHistory(practiceId) {
             return;
         }
 
-        recordingsList.innerHTML = data.recordings.map(recording => {
-            const audioUrl = recording.path;
-            const formattedTime = new Date(recording.timestamp).toLocaleString('zh-TW');
-            
-            return `
-                <li class="recording-item">
-                    <div class="recording-time">${formattedTime}</div>
-                    <div class="audio-player">
-                        <audio controls controlsList="nodownload" crossorigin="anonymous">
-                            <source src="${audioUrl}" type="audio/wav">
-                            您的瀏覽器不支援音訊播放
-                        </audio>
-                    </div>
-                    <div class="recording-text">${recording.transcription || '無轉錄文字'}</div>
-                </li>
-            `;
-        }).join('');
+        recordingsList.replaceChildren();
+        data.recordings.forEach(recording => {
+            const item = document.createElement('li');
+            item.className = 'recording-item';
+            const time = document.createElement('div');
+            time.className = 'recording-time';
+            time.textContent = new Date(recording.timestamp).toLocaleString('zh-TW');
+            const player = document.createElement('div');
+            player.className = 'audio-player';
+            const audioUrl = getSafeMediaUrl(recording.path);
+            if (audioUrl) {
+                const audio = document.createElement('audio');
+                audio.controls = true;
+                audio.controlsList = 'nodownload';
+                audio.crossOrigin = 'anonymous';
+                audio.src = audioUrl;
+                player.appendChild(audio);
+            } else {
+                player.textContent = '錄音網址無效';
+            }
+            const transcription = document.createElement('div');
+            transcription.className = 'recording-text';
+            transcription.textContent = recording.transcription || '無轉錄文字';
+            item.append(time, player, transcription);
+            recordingsList.appendChild(item);
+        });
 
     } catch (error) {
         console.error('載入錄音歷史失敗:', error);
+        if (String(currentPracticeId || '') !== String(practiceId)) return;
         const recordingsList = document.getElementById('recordingsList');
         if(recordingsList) recordingsList.innerHTML = '<li class="error-message">載入錄音記錄時發生錯誤</li>';
     }
@@ -3720,23 +4478,32 @@ async function loadFeedbackList(practiceId) {
         }
 
         const data = await response.json();
+        if (String(currentPracticeId || '') !== String(practiceId)) return;
         if (data.success) {
             if (data.feedback.length === 0) {
                 feedbackList.innerHTML = '<p class="no-feedback">目前尚無心得紀錄。</p>';
                 return;
             }
 
-            feedbackList.innerHTML = data.feedback.map(item => `
-                <div class="feedback-item">
-                    <div class="feedback-content">${item.comment}</div>
-                    <div class="feedback-time">${new Date(item.createdAt).toLocaleString('zh-TW')}</div>
-                </div>
-            `).join('');
+            feedbackList.replaceChildren();
+            data.feedback.forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'feedback-item';
+                const content = document.createElement('div');
+                content.className = 'feedback-content';
+                content.textContent = item.comment;
+                const time = document.createElement('div');
+                time.className = 'feedback-time';
+                time.textContent = new Date(item.createdAt).toLocaleString('zh-TW');
+                row.append(content, time);
+                feedbackList.appendChild(row);
+            });
         } else {
             throw new Error(data.message || '載入心得失敗');
         }
     } catch (error) {
         console.error('載入心得失敗:', error);
+        if (String(currentPracticeId || '') !== String(practiceId)) return;
         feedbackList.innerHTML = '<p class="no-feedback">載入失敗，請稍後重試。</p>';
     }
 }

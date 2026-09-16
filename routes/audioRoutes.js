@@ -105,7 +105,7 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
 
     // 轉錄音頻（已包含簡繁轉換）
     const transcription = await transcribeAudio(s3Result.Location);
-    console.log('轉錄完成:', transcription);
+    console.log('轉錄完成，字數:', transcription ? transcription.length : 0);
 
     // 準備錄音記錄
     const newRecording = {
@@ -114,13 +114,15 @@ router.post('/transcribe', upload.single('audio'), async (req, res) => {
       transcription
     };
 
-    // 避免重複儲存
-    const isDuplicate = practice.recordings.some(r => r.path === newRecording.path);
-    if (!isDuplicate) {
-      practice.recordings.push(newRecording);
-      await user.save();
-      console.log('錄音記錄已保存');
+    const recordingUpdate = await User.updateOne(
+      { _id: req.user.id, 'practices._id': req.body.practiceId },
+      { $push: { 'practices.$.recordings': newRecording }, $inc: { __v: 1 } },
+      { runValidators: true }
+    );
+    if (recordingUpdate.matchedCount !== 1) {
+      throw new Error(converter('練習記錄未找到或無權存取'));
     }
+    console.log('錄音記錄已保存');
 
     res.json({
       success: true,
@@ -171,8 +173,14 @@ router.post('/save-recording', voice2Upload.single('audio'), async (req, res) =>
       transcription: typeof req.body.transcription === 'string' ? req.body.transcription.trim() : ''
     };
 
-    practice.recordings.push(newRecording);
-    await user.save();
+    const recordingUpdate = await User.updateOne(
+      { _id: req.user.id, 'practices._id': req.body.practiceId },
+      { $push: { 'practices.$.recordings': newRecording }, $inc: { __v: 1 } },
+      { runValidators: true }
+    );
+    if (recordingUpdate.matchedCount !== 1) {
+      throw new Error('練習記錄未找到或無權存取');
+    }
 
     res.json({ success: true, recording: newRecording });
   } catch (error) {

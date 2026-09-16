@@ -1,9 +1,9 @@
 const { generateChatResponse } = require('./openaiService');
 const { getDialogueState } = require('./dialogueService');
-const { updateOwnedPractice: updatePractice } = require('./ownedPracticeService');
 
 /**
- * 分析對話並將結果保存到練習紀錄
+ * 分析對話並回傳結果。資料庫寫入由呼叫端連同最終 history 一次提交，
+ * 避免同一份分析被重複寫入或在部分成功後再次付費生成。
  * @param {String} userId 使用者的 ID
  * @param {String} practiceId 練習的 ID
  * @returns {String} 分析結果
@@ -56,7 +56,7 @@ async function analyzeDialogue(userId, practiceId) {
       sampleCount: count
     };
 
-    console.log('聚合的非語言數據:', aggregatedNonverbalData);
+    console.log('非語言數據聚合完成，回合數:', count);
   }
 
   const conversationHistory = limitedHistory.map(entry => `${entry.role}: ${entry.content}`).join('\n');
@@ -65,7 +65,6 @@ async function analyzeDialogue(userId, practiceId) {
   try {
 
       const analysis = await generateChatResponse([{ role: "user", content: prompt }]);
-      await updatePractice(userId, practiceId, { analysis });
       return analysis;
 
   } catch (error) {

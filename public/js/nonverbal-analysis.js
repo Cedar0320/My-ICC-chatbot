@@ -1,7 +1,4 @@
-// 非語言分析模組
-import {
-    FilesetResolver
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+// 非語言分析模組（使用 test.html 已載入的 Holistic / Camera 全域元件）
 
 // DOM 元素
 const videoElement = document.getElementById('input_video');
@@ -26,6 +23,20 @@ let isRunning = false;
 let holistic;
 let camera;
 let lastVideoTime = -1;
+let nonverbalInitializationPromise = null;
+let cameraStartGeneration = 0;
+const CAMERA_START_TIMEOUT_MS = 20000;
+const VIDEO_READY_TIMEOUT_MS = 10000;
+
+function withTimeout(promise, timeoutMs, message) {
+    let timer;
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        })
+    ]).finally(() => clearTimeout(timer));
+}
 
 // 非語言數據收集
 let nonverbalData = {
@@ -70,6 +81,7 @@ async function initNonverbalAnalysis() {
 
     } catch (e) {
         console.error('❌ 非語言分析初始化錯誤:', e);
+        throw e;
     }
 }
 
@@ -77,28 +89,25 @@ async function initNonverbalAnalysis() {
 async function startNonverbalAnalysis() {
     if (isRunning) {
         console.log('非語言分析已在運行中');
-        return;
+        return true;
     }
-
-    isRunning = true;
-    if (nonverbalWindow) {
-        nonverbalWindow.style.display = 'block';
-    }
-
-    console.log('開始啟動非語言分析...');
-
-    // 初始化非語言數據
-    if (!nonverbalData || !nonverbalData.eyeContact) {
-        resetCurrentData();
-    }
-
-    // 初始化數據品質追蹤
-    dataQualityMetrics.startTime = Date.now();
-    dataQualityMetrics.endTime = null;
-    dataQualityMetrics.totalFrames = 0;
-    dataQualityMetrics.framesWithFaceDetection = 0;
 
     try {
+        if (nonverbalInitializationPromise) {
+            await nonverbalInitializationPromise;
+        }
+        if (!holistic) throw new Error('非語言分析模型尚未就緒');
+
+        isRunning = true;
+        if (nonverbalWindow) nonverbalWindow.style.display = 'block';
+        console.log('開始啟動非語言分析...');
+
+        if (!nonverbalData || !nonverbalData.eyeContact) resetCurrentData();
+        dataQualityMetrics.startTime = Date.now();
+        dataQualityMetrics.endTime = null;
+        dataQualityMetrics.totalFrames = 0;
+        dataQualityMetrics.framesWithFaceDetection = 0;
+
         console.log('準備啟動 Camera...');
         console.log('Video element:', videoElement);
         console.log('Holistic:', holistic);
@@ -114,7 +123,8 @@ async function startNonverbalAnalysis() {
             camera = null;
         }
 
-        camera = new Camera(videoElement, {
+        const currentCameraGeneration = ++cameraStartGeneration;
+        const cameraInstance = new Camera(videoElement, {
             onFrame: async () => {
                 if (!isRunning) return;
 
@@ -129,24 +139,60 @@ async function startNonverbalAnalysis() {
             width: 1280,
             height: 720
         });
+        camera = cameraInstance;
 
         console.log('Camera 物件已創建,準備啟動...');
-        await camera.start();
+        const cameraStartPromise = Promise.resolve().then(() => cameraInstance.start());
+        cameraStartPromise.then(() => {
+            if (!isRunning || currentCameraGeneration !== cameraStartGeneration) {
+                try { cameraInstance.stop(); } catch (_) {}
+                if (videoElement?.srcObject) {
+                    try { videoElement.srcObject.getTracks().forEach(track => track.stop()); } catch (_) {}
+                    videoElement.srcObject = null;
+                }
+            }
+        }).catch(() => {});
+        await withTimeout(
+            cameraStartPromise,
+            CAMERA_START_TIMEOUT_MS,
+            '鏡頭啟動逾時，請確認瀏覽器權限與攝影機狀態'
+        );
+        if (!isRunning || currentCameraGeneration !== cameraStartGeneration) {
+            throw new Error('非語言分析已取消');
+        }
         console.log('✅ 鏡頭已成功啟動!');
 
         // 等待視訊流準備好
-        await new Promise((resolve) => {
+        await withTimeout(new Promise((resolve, reject) => {
             const checkVideo = setInterval(() => {
+                if (!isRunning) {
+                    clearInterval(checkVideo);
+                    reject(new Error('非語言分析已取消'));
+                    return;
+                }
                 if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
                     clearInterval(checkVideo);
                     console.log(`✅ 視訊流已就緒: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
                     resolve();
                 }
             }, 100);
-        });
+        }), VIDEO_READY_TIMEOUT_MS, '鏡頭已開啟，但視訊畫面未就緒');
+
+        return true;
 
     } catch (error) {
         console.error('❌ 啟動鏡頭失敗:', error);
+        isRunning = false;
+        cameraStartGeneration += 1;
+        if (camera) {
+            try { camera.stop(); } catch (_) {}
+            camera = null;
+        }
+        if (videoElement?.srcObject) {
+            try { videoElement.srcObject.getTracks().forEach(track => track.stop()); } catch (_) {}
+            videoElement.srcObject = null;
+        }
+        if (nonverbalWindow) nonverbalWindow.style.display = 'none';
         throw error;
     }
 }
@@ -175,6 +221,7 @@ function resetCurrentData() {
 function stopNonverbalAnalysis() {
     console.log('停止非語言分析...');
     isRunning = false;
+    cameraStartGeneration += 1;
 
     if (camera) {
         try {
@@ -184,6 +231,11 @@ function stopNonverbalAnalysis() {
             console.warn('停止camera時出錯:', e);
         }
         camera = null; // 清空camera引用
+    }
+
+    if (videoElement?.srcObject) {
+        try { videoElement.srcObject.getTracks().forEach(track => track.stop()); } catch (_) {}
+        videoElement.srcObject = null;
     }
 
     if (nonverbalWindow) {
@@ -364,7 +416,7 @@ function getNonverbalSummary() {
         }
     };
 
-    console.log('📊 非語言數據摘要:', summary);
+    console.log('非語言數據摘要已建立，樣本數:', summary.dataQuality.sampleCount);
 
     return summary;
 }
@@ -380,7 +432,8 @@ if (canvasElement && videoElement) {
     canvasElement.height = 720;
     console.log('初始 Canvas 尺寸:', canvasElement.width, 'x', canvasElement.height);
 
-    initNonverbalAnalysis();
+    nonverbalInitializationPromise = initNonverbalAnalysis();
+    nonverbalInitializationPromise.catch(() => {});
 } else {
     console.error('❌ Canvas 或 Video 元素未找到!');
     console.log('Canvas element:', canvasElement);

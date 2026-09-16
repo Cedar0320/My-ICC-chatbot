@@ -64,7 +64,7 @@ router.post('/client-secret', async (req, res) => {
     if (!openaiResponse.ok) {
       console.error('建立 Realtime client secret 失敗:', {
         status: openaiResponse.status,
-        response: responseText.slice(0, 800)
+        message: data?.error?.message || 'unknown upstream error'
       });
       return res.status(502).json({
         success: false,
@@ -75,7 +75,7 @@ router.post('/client-secret', async (req, res) => {
     }
 
     if (!data?.value) {
-      console.error('Realtime client secret 回應缺少 value:', responseText.slice(0, 800));
+      console.error('Realtime client secret 回應缺少 value');
       return res.status(502).json({
         success: false,
         error: 'Realtime 短效憑證格式異常'

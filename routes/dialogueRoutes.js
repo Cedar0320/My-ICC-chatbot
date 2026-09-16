@@ -570,12 +570,104 @@ const { getPracticeDetails } = require('../services/practiceService');
 const { updateOwnedPractice: updatePractice } = require('../services/ownedPracticeService');
 const { generateChatResponse, generateSpeech, generateSpeechStream } = require('../services/openaiService'); // 匯入 OpenAI API 工具
 const path = require('path');
+const fs = require('fs');
+
+const LEGACY_TTS_TEMP_TTL_MS = 10 * 60 * 1000;
+const LEGACY_TTS_TEMP_DIR = path.join(process.cwd(), 'temp');
+
+function scheduleLegacyTtsCleanup(filePath) {
+    const cleanupTimer = setTimeout(() => {
+        fs.unlink(filePath, error => {
+            if (error && error.code !== 'ENOENT') {
+                console.error('清理舊版 TTS 暫存檔失敗:', error.message);
+            }
+        });
+    }, LEGACY_TTS_TEMP_TTL_MS);
+    cleanupTimer.unref?.();
+}
+
+function cleanupExpiredLegacyTtsFiles() {
+    fs.readdir(LEGACY_TTS_TEMP_DIR, { withFileTypes: true }, (readError, entries = []) => {
+        if (readError) {
+            if (readError.code !== 'ENOENT') {
+                console.error('掃描舊版 TTS 暫存檔失敗:', readError.message);
+            }
+            return;
+        }
+
+        const oldestAllowedTime = Date.now() - LEGACY_TTS_TEMP_TTL_MS;
+        entries
+            .filter(entry => entry.isFile() && /^speech-\d+\.mp3$/.test(entry.name))
+            .forEach(entry => {
+                const filePath = path.join(LEGACY_TTS_TEMP_DIR, entry.name);
+                fs.stat(filePath, (statError, stats) => {
+                    if (statError || stats.mtimeMs >= oldestAllowedTime) return;
+                    fs.unlink(filePath, unlinkError => {
+                        if (unlinkError && unlinkError.code !== 'ENOENT') {
+                            console.error('清理過期 TTS 暫存檔失敗:', unlinkError.message);
+                        }
+                    });
+                });
+            });
+    });
+}
+
+cleanupExpiredLegacyTtsFiles();
 
 // Voice 2.0 成本保護：所有輸入方式共用同一套硬上限。
 const PRACTICE_TURN_REMINDER = 8;
 const PRACTICE_TURN_HARD_LIMIT = 10;
 const BASIC_TIME_LIMIT_SECONDS = 8 * 60;
 const CHALLENGE_TIME_LIMIT_SECONDS = 6 * 60;
+
+// 同一筆練習的回合必須依序處理。這不只防止快速連點，也讓相同
+// clientTurnId 的第二個請求等第一個完成，再直接取得同一份結果。
+const dialogueTurnQueues = new Map();
+const completedTurnResponseCache = new Map();
+const COMPLETED_TURN_CACHE_MS = 10 * 60 * 1000;
+
+async function acquireDialogueTurnLock(key) {
+    const previous = dialogueTurnQueues.get(key) || Promise.resolve();
+    let releaseCurrent;
+    const current = new Promise(resolve => { releaseCurrent = resolve; });
+    const tail = previous.catch(() => {}).then(() => current);
+    dialogueTurnQueues.set(key, tail);
+    await previous.catch(() => {});
+
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        releaseCurrent();
+        if (dialogueTurnQueues.get(key) === tail) {
+            tail.finally(() => {
+                if (dialogueTurnQueues.get(key) === tail) dialogueTurnQueues.delete(key);
+            });
+        }
+    };
+}
+
+function getCompletedTurnResponse(key) {
+    const cached = completedTurnResponseCache.get(key);
+    if (!cached) return null;
+    if (cached.expiresAt <= Date.now()) {
+        completedTurnResponseCache.delete(key);
+        return null;
+    }
+    return cached.payload;
+}
+
+function cacheCompletedTurnResponse(key, payload) {
+    if (!key) return;
+    completedTurnResponseCache.set(key, {
+        payload,
+        expiresAt: Date.now() + COMPLETED_TURN_CACHE_MS
+    });
+    if (completedTurnResponseCache.size > 1000) {
+        const oldestKey = completedTurnResponseCache.keys().next().value;
+        if (oldestKey) completedTurnResponseCache.delete(oldestKey);
+    }
+}
 
 function getPracticeTimeLimitSeconds(challengeMode) {
     return challengeMode ? CHALLENGE_TIME_LIMIT_SECONDS : BASIC_TIME_LIMIT_SECONDS;
@@ -665,12 +757,7 @@ function validateNonverbalData(data) {
       };
     }
 
-    console.log('✅ 非語言數據驗證成功:', {
-      eyeContactRate: validated.eyeContactRate,
-      smileRate: validated.smileRate,
-      openPostureRate: validated.openPostureRate,
-      gesturesUsed: validated.gesturesUsed
-    });
+    console.log('非語言數據驗證成功');
 
     return validated;
   } catch (error) {
@@ -684,8 +771,16 @@ function validateNonverbalData(data) {
 // 在 dialogueRoutes.js 中修改 start-dialogue 路由
 
 router.post('/start-dialogue', async (req, res) => {
+    let releaseTurnLock = null;
     try {
-        const { technique, practiceId, difficulty, specifiedScenario, reuseExactScenario = false } = req.body;
+        const {
+            technique,
+            practiceId,
+            difficulty,
+            specifiedScenario,
+            reuseExactScenario = false,
+            parentCharacter
+        } = req.body;
         const userId = req.user.id;
 
         if (!practiceId) {
@@ -706,12 +801,18 @@ router.post('/start-dialogue', async (req, res) => {
             });
         }
 
+        releaseTurnLock = await acquireDialogueTurnLock(`${userId}:${practiceId}`);
+
         // 先確認練習屬於目前登入者。重新練習時，以 DB 中剛建立的 retry practice
         // 為唯一設定來源，避免畫面下拉選單目前的值污染原本的技巧/難度/情境。
         const practice = await getPracticeDetails(userId, practiceId);
         const isExactRetry = Boolean(reuseExactScenario && practice.isRetry);
         const effectiveTechnique = isExactRetry ? practice.technique : technique;
         const effectiveDifficulty = isExactRetry ? practice.difficulty : difficulty;
+        const requestedParentCharacter = parentCharacter === 'father' ? 'father' : 'mother';
+        const effectiveParentCharacter = isExactRetry
+            ? (practice.parentCharacter === 'father' ? 'father' : 'mother')
+            : requestedParentCharacter;
 
         if (!effectiveTechnique || !effectiveDifficulty) {
             console.error('缺少有效的練習設定:', { effectiveTechnique, effectiveDifficulty, practiceId });
@@ -750,14 +851,18 @@ router.post('/start-dialogue', async (req, res) => {
         } else {
             let selectedScenario;
             if (specifiedScenario) {
-                console.log('使用指定情境:', specifiedScenario);
+                console.log('使用指定情境');
                 selectedScenario = specifiedScenario;
             } else {
                 selectedScenario = scenarios[Math.floor(Math.random() * scenarios.length)];
-                console.log('選擇隨機情境:', selectedScenario);
+                console.log('已選擇隨機情境');
             }
 
-            const initialMessage = createInitialMessage(selectedScenario, selectedPersonality);
+            const initialMessage = createInitialMessage(
+                selectedScenario,
+                selectedPersonality,
+                effectiveParentCharacter
+            );
             const response = await generateChatResponse([{ role: "user", content: initialMessage }]);
 
             if (!response) {
@@ -766,7 +871,7 @@ router.post('/start-dialogue', async (req, res) => {
 
             const parsedResponse = parseInitialResponse(response);
             if (!parsedResponse) {
-                console.error('AI 回應解析失敗，原始回應:', response);
+                console.error('AI 回應解析失敗');
                 return res.status(500).json({
                     success: false,
                     message: 'AI 回應解析失敗',
@@ -787,6 +892,7 @@ router.post('/start-dialogue', async (req, res) => {
         updateDialogueState(userId, practiceId, {
             scenario,
             parentPersonality: selectedPersonality,
+            parentCharacter: effectiveParentCharacter,
             history: [],
             count: 0,
             challengeMode,
@@ -797,11 +903,15 @@ router.post('/start-dialogue', async (req, res) => {
             deadlineGraceUsed: false
         });
 
-        await updatePractice(userId, practiceId, { scenario });
+        await updatePractice(userId, practiceId, {
+            scenario,
+            parentCharacter: effectiveParentCharacter
+        });
 
         res.json({
             success: true,
             scenario,
+            parentCharacter: effectiveParentCharacter,
             challengeMode,
             challengeDuration: timeLimitSeconds,
             timeLimitSeconds,
@@ -820,10 +930,13 @@ router.post('/start-dialogue', async (req, res) => {
                 stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
             }
         });
+    } finally {
+        if (releaseTurnLock) releaseTurnLock();
     }
 });
 
-function createInitialMessage(scenario, parentPersonality) {
+function createInitialMessage(scenario, parentPersonality, parentCharacter = 'mother') {
+  const parentRole = parentCharacter === 'father' ? '父親／爸爸' : '母親／媽媽';
   return `請根據下列情境背景與家長個性特徵，生成對話練習的起始情境。請用繁體中文，並嚴格按照以下格式回應：
 
 情境內容：
@@ -836,6 +949,9 @@ ${scenario}
 家長個性特徵：
 ${parentPersonality}
 
+本次家長角色：
+${parentRole}
+
 重要限制：
 - 只生成「情境內容」，不要生成其他欄位。
 - 情境內容只描述發生的情況，需包含清楚的人事時地物。
@@ -843,6 +959,7 @@ ${parentPersonality}
 - 不要生成老師任務。
 - 不要生成老師建議開場白。
 - 不要生成家長第一句話。
+- 情境背景若使用了不同性別的家長稱呼，必須改成本次指定的家長角色，不可保留錯誤的「父親／母親」或「爸爸／媽媽」稱呼。
 - 不要提供完整開場句、對話範例或可直接複製的句子。
 - 不要讓家長在對話開始前主動表達完整擔心、分析問題或提出解決方案。
 - 不要引入情境背景以外的人物、事件或問題。`;
@@ -868,7 +985,7 @@ function parseInitialResponse(response) {
         return { scenario };
     } catch (error) {
         console.error('解析 AI 回應時發生錯誤:', error);
-        console.error('原始回應內容:', response);
+        console.error('原始回應長度:', typeof response === 'string' ? response.length : 0);
         throw new Error(`解析 AI 回應失敗: ${error.message}`);
     }
 }
@@ -878,6 +995,7 @@ function parseInitialResponse(response) {
 
 // 更新 continue-dialogue 路由，確保在對話完成時更新分析結果
 router.post('/continue-dialogue', async (req, res) => {
+    let releaseTurnLock = null;
     let rollbackState = null;
     let rollbackHistoryLength = null;
     let rollbackCount = null;
@@ -893,25 +1011,57 @@ router.post('/continue-dialogue', async (req, res) => {
             clientTurnId
         } = req.body;
         const userId = req.user.id;
-        console.log("收到請求：", req.body);
-
-        // 如果有非語言數據，記錄到日誌
-        if (nonverbalData) {
-            console.log("收到非語言數據:", nonverbalData);
-        }
-
         if (!practiceId) {
             throw new Error('練習 ID 缺失');
         }
 
-        const dialogueState = getDialogueState(userId, practiceId);
-        if (!dialogueState || !Array.isArray(dialogueState.history)) {
-            throw new Error('對話狀態丟失或無效');
-        }
+        const turnQueueKey = `${userId}:${practiceId}`;
+        releaseTurnLock = await acquireDialogueTurnLock(turnQueueKey);
 
         const normalizedClientTurnId = typeof clientTurnId === 'string'
             ? clientTurnId.trim().slice(0, 100)
             : '';
+        const completedTurnKey = normalizedClientTurnId
+            ? `${turnQueueKey}:${normalizedClientTurnId}`
+            : '';
+        const cachedResponse = getCompletedTurnResponse(completedTurnKey);
+        if (cachedResponse) return res.json(cachedResponse);
+
+        console.log('處理對話回合:', {
+            userId,
+            practiceId,
+            clientTurnId: normalizedClientTurnId || null,
+            hasNonverbalData: Boolean(nonverbalData)
+        });
+
+        const dialogueState = getDialogueState(userId, practiceId);
+        if (!dialogueState || !Array.isArray(dialogueState.history)) {
+            // 最終回合其實已寫入、但瀏覽器沒收到回應時，使用同一 clientTurnId
+            // 重送可直接取得完成結果，不再重新呼叫家長回覆或分析模型。
+            const completedPractice = await getPracticeDetails(userId, practiceId);
+            if (completedPractice.analysis) {
+                const completedHistory = Array.isArray(completedPractice.history)
+                    ? completedPractice.history
+                    : [];
+                const completedTeacherTurns = completedHistory.filter(entry => entry.role === '導師').length;
+                const finalParentEntry = [...completedHistory].reverse().find(entry => entry.role === '家長');
+                const completedPayload = {
+                    success: true,
+                    completed: true,
+                    response: finalParentEntry?.content || undefined,
+                    analysis: completedPractice.analysis,
+                    endReason: completedTeacherTurns >= PRACTICE_TURN_HARD_LIMIT ? 'turn' : 'time',
+                    practiceId,
+                    turnCount: completedTeacherTurns,
+                    turnReminder: PRACTICE_TURN_REMINDER,
+                    turnLimit: PRACTICE_TURN_HARD_LIMIT
+                };
+                cacheCompletedTurnResponse(completedTurnKey, completedPayload);
+                return res.json(completedPayload);
+            }
+            throw new Error('對話狀態丟失或無效');
+        }
+
         if (!(dialogueState.completedClientTurns instanceof Map)) {
             dialogueState.completedClientTurns = new Map();
         }
@@ -932,8 +1082,7 @@ router.post('/continue-dialogue', async (req, res) => {
                 analysis
             });
             const finalTurnCount = getTeacherTurnCount();
-            deleteDialogueState(userId, practiceId);
-            return res.json({
+            const responsePayload = {
                 success: true,
                 completed: true,
                 response: finalParentResponse || undefined,
@@ -943,7 +1092,10 @@ router.post('/continue-dialogue', async (req, res) => {
                 turnCount: finalTurnCount,
                 turnReminder: PRACTICE_TURN_REMINDER,
                 turnLimit
-            });
+            };
+            cacheCompletedTurnResponse(completedTurnKey, responsePayload);
+            deleteDialogueState(userId, practiceId);
+            return res.json(responsePayload);
         };
 
         // 後端硬限制：即使前端計時器失效，也不能送出第 11 輪或在時間到後開新一輪。
@@ -992,6 +1144,7 @@ router.post('/continue-dialogue', async (req, res) => {
         }
 
         const parentPersonality = dialogueState.parentPersonality || '擔心但願意合作：有情緒（焦慮/不安），會提出疑問與顧慮，但願意聽老師說明並討論下一步。';
+        const parentRole = dialogueState.parentCharacter === 'father' ? '父親／爸爸' : '母親／媽媽';
         const generatedScenarioContent = dialogueState.scenario || '';
         const difficultyLevel = dialogueState.challengeMode ? '挑戰模式' : '基礎模式';
 
@@ -1007,7 +1160,7 @@ ${generatedScenarioContent}
 ${difficultyLevel}
 
 【角色設定】
-你是一般學生家長，不是教師、教育專家、諮商師或評審。你不知道老師正在練習哪一種溝通技巧。請根據老師上一句話自然回應，可以表達擔心、疑惑、無奈、猶豫或些微防衛，但不要主動提出完整解決方案，也不要引導老師使用特定技巧。
+你是學生的${parentRole}，不是教師、教育專家、諮商師或評審。不得自稱為另一種家長角色。你不知道老師正在練習哪一種溝通技巧。請根據老師上一句話自然回應，可以表達擔心、疑惑、無奈、猶豫或些微防衛，但不要主動提出完整解決方案，也不要引導老師使用特定技巧。
 
 【真實家長語感】
 - 回覆要像正在通話中的家長，不要像書面作文或教育專家評論。
@@ -1096,6 +1249,7 @@ ${difficultyLevel}
 
         if (normalizedClientTurnId) {
             dialogueState.completedClientTurns.set(normalizedClientTurnId, responsePayload);
+            cacheCompletedTurnResponse(completedTurnKey, responsePayload);
         }
         rollbackHistoryLength = null;
         rollbackCount = null;
@@ -1119,6 +1273,8 @@ ${difficultyLevel}
             success: false, 
             error: error.message || '處理對話時發生錯誤'
         });
+    } finally {
+        if (releaseTurnLock) releaseTurnLock();
     }
 });
 // Voice 2.0：直接串流 TTS 音訊，不先寫入 temp MP3。
@@ -1151,6 +1307,11 @@ router.post('/tts-stream', async (req, res) => {
                 res.end();
             }
         });
+        res.once('close', () => {
+            if (!res.writableEnded && typeof speechStream.destroy === 'function') {
+                speechStream.destroy();
+            }
+        });
         speechStream.pipe(res);
     } catch (error) {
         console.error('TTS 串流錯誤:', error.message);
@@ -1178,6 +1339,8 @@ router.post('/tts', async (req, res) => {
         await getPracticeDetails(req.user.id, practiceId);
         const generatedPath = await generateSpeech(text.trim(), voice || 'nova');
         const audioFilePath = `/audio/${path.basename(generatedPath)}`;
+        // 舊版 fallback 只供當次瀏覽器播放，十分鐘後自動刪除，避免 temp 長期累積。
+        scheduleLegacyTtsCleanup(generatedPath);
         res.json({ success: true, audioFilePath });
     } catch (error) {
         console.error('TTS 錯誤:', error);
@@ -1187,13 +1350,27 @@ router.post('/tts', async (req, res) => {
 
 // 手動結束對話並取得分析
 router.post('/end-dialogue', async (req, res) => {
+    let releaseTurnLock = null;
     try {
         const { practiceId } = req.body;
         const userId = req.user.id;
         if (!practiceId) throw new Error('練習 ID 缺失');
 
+        releaseTurnLock = await acquireDialogueTurnLock(`${userId}:${practiceId}`);
+
         const dialogueState = getDialogueState(userId, practiceId);
-        if (!dialogueState) throw new Error('對話狀態丟失');
+        if (!dialogueState) {
+            // 同一個結束請求若因網路重送，不要把已完成的練習誤報為失敗。
+            const completedPractice = await getPracticeDetails(userId, practiceId);
+            if (completedPractice.analysis) {
+                return res.json({
+                    completed: true,
+                    analysis: completedPractice.analysis,
+                    practiceId
+                });
+            }
+            throw new Error('對話狀態丟失');
+        }
 
         const analysis = await analyzeDialogue(userId, practiceId);
 
@@ -1207,6 +1384,8 @@ router.post('/end-dialogue', async (req, res) => {
     } catch (error) {
         console.error('end-dialogue 錯誤:', error);
         res.status(500).json({ success: false, error: error.message });
+    } finally {
+        if (releaseTurnLock) releaseTurnLock();
     }
 });
 

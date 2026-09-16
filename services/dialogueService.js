@@ -1,6 +1,18 @@
 // 每筆練習各自保存對話狀態，避免不同使用者同時練習時互相覆蓋。
 // practiceId 是 MongoDB 全域唯一值，再搭配 userId 驗證狀態擁有者。
 const dialogueStates = new Map();
+const DIALOGUE_STATE_TTL_MS = 2 * 60 * 60 * 1000;
+const DIALOGUE_STATE_SWEEP_MS = 15 * 60 * 1000;
+
+const dialogueStateSweepTimer = setInterval(() => {
+  const expiredBefore = Date.now() - DIALOGUE_STATE_TTL_MS;
+  for (const [key, state] of dialogueStates.entries()) {
+    if (!state.lastActivityAt || state.lastActivityAt < expiredBefore) {
+      dialogueStates.delete(key);
+    }
+  }
+}, DIALOGUE_STATE_SWEEP_MS);
+if (typeof dialogueStateSweepTimer.unref === 'function') dialogueStateSweepTimer.unref();
 
 function getStateKey(practiceId) {
   if (!practiceId) {
@@ -10,6 +22,7 @@ function getStateKey(practiceId) {
 }
 
 function createInitialState(userId, practiceId, technique) {
+  const now = Date.now();
   return {
     userId: String(userId),
     practiceId: String(practiceId),
@@ -17,7 +30,9 @@ function createInitialState(userId, practiceId, technique) {
     history: [],
     technique,
     scenario: '',
-    recordings: []
+    recordings: [],
+    createdAt: now,
+    lastActivityAt: now
   };
 }
 
@@ -38,6 +53,11 @@ function getDialogueState(userId, practiceId) {
 
   if (!state) return null;
   if (String(state.userId) !== String(userId)) return null;
+  if (!state.lastActivityAt || Date.now() - state.lastActivityAt > DIALOGUE_STATE_TTL_MS) {
+    dialogueStates.delete(key);
+    return null;
+  }
+  state.lastActivityAt = Date.now();
   return state;
 }
 
@@ -68,7 +88,7 @@ function addRecording(userId, practiceId, recording) {
 
   if (!existingRecording) {
     state.recordings.push(recording);
-    console.log('新錄音已添加到對話狀態:', recording);
+    console.log('新錄音已添加到對話狀態，總數:', state.recordings.length);
   } else {
     console.warn('錄音已存在，未重複添加:', recording.path);
   }

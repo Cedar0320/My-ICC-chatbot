@@ -177,7 +177,7 @@ router.patch('/practices/:id', validatePracticeUpdate, async (req, res) => {
 
     // 驗證更新資料的格式
     const updates = req.body;
-    console.log('Received update data:', updates); // 調試用
+    console.log('Received practice update fields:', Object.keys(updates || {}));
 
     // 驗證更新資料的結構
     if (updates.history) {
@@ -225,6 +225,9 @@ router.delete('/practices/:id', async (req, res) => {
   try {
     const userId = req.user.id;
     const practiceId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(practiceId)) {
+      return res.status(400).json({ success: false, message: '無效的練習 ID' });
+    }
     await deletePractice(userId, practiceId);
     res.json({ success: true, message: '練習已刪除' });
   } catch (error) {
@@ -241,26 +244,23 @@ router.post('/:practiceId/feedback', authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: '回饋內容為必填' });
     }
 
-    const user = await User.findOne({
-      _id: req.user.id,
-      'practices._id': practiceId
-    });
-    if (!user) {
+    const feedbackUpdate = await User.updateOne(
+      { _id: req.user.id, 'practices._id': practiceId },
+      {
+        $push: {
+          'practices.$.feedback': {
+            userId: req.user.id,
+            comment,
+            createdAt: new Date()
+          }
+        },
+        $inc: { __v: 1 }
+      },
+      { runValidators: true }
+    );
+    if (feedbackUpdate.matchedCount !== 1) {
       return res.status(404).json({ success: false, message: '找不到該練習記錄' });
     }
-
-    const practice = user.practices.id(practiceId);
-    if (!practice) {
-      return res.status(404).json({ success: false, message: '練習不存在' });
-    }
-
-    practice.feedback.push({
-      userId: req.user.id,
-      comment,
-      createdAt: new Date()
-    });
-
-    await user.save();
     res.json({ success: true, message: '心得提交成功' });
   } catch (error) {
     console.error('提交心得失敗:', error);
@@ -345,6 +345,7 @@ router.post('/practices/:id/retry', async (req, res) => {
       difficulty: originalPractice.difficulty,
       scenario: originalPractice.scenario,
       isNonverbalEnabled: originalNonverbalEnabled,
+      parentCharacter: originalPractice.parentCharacter === 'father' ? 'father' : 'mother',
       isRetry: true,
       originalPracticeId: originalPracticeId
     });

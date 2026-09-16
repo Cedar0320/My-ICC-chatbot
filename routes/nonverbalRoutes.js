@@ -9,13 +9,9 @@ console.log('✅ nonverbalRoutes.js 已載入');
  * 獲取單次練習的非語言分析詳情
  */
 router.get('/practice/:practiceId', async (req, res) => {
-    console.log('🔍 /practice/:practiceId route called');
-    console.log('📋 Request params:', req.params);
-    console.log('👤 User info:', req.user);
     try {
         const { practiceId } = req.params;
         const userId = req.user.id;
-        console.log(`查找用戶 ${userId} 的練習 ${practiceId}`);
 
         // 查找用戶和練習
         const user = await User.findById(userId);
@@ -61,7 +57,6 @@ router.get('/practice/:practiceId', async (req, res) => {
 
     } catch (error) {
         console.error('❌ 獲取練習非語言數據失敗:', error);
-        console.error('錯誤堆疊:', error.stack);
         res.status(500).json({
             success: false,
             message: '獲取數據失敗',

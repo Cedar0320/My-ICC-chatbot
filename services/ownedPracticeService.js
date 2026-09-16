@@ -11,7 +11,7 @@ async function updateOwnedPractice(userId, practiceId, updates) {
   const user = await User.findOne({
     _id: userId,
     'practices._id': practiceId
-  });
+  }).select('practices');
 
   if (!user) {
     throw new Error('練習不存在或無權存取');
@@ -22,35 +22,58 @@ async function updateOwnedPractice(userId, practiceId, updates) {
     throw new Error('練習不存在或無權存取');
   }
 
-  if (updatesObj.history) {
+  const atomicSet = {};
+
+  if (updatesObj.history !== undefined) {
     if (!Array.isArray(updatesObj.history)) {
       throw new Error('history 必須是陣列格式');
     }
-    practice.history = updatesObj.history;
+    atomicSet['practices.$.history'] = updatesObj.history;
   }
 
   if (updatesObj.scenario !== undefined) {
-    practice.scenario = updatesObj.scenario;
+    atomicSet['practices.$.scenario'] = updatesObj.scenario;
   }
   if (updatesObj.teacherSuggestion !== undefined) {
-    practice.teacherSuggestion = updatesObj.teacherSuggestion;
+    atomicSet['practices.$.teacherSuggestion'] = updatesObj.teacherSuggestion;
   }
   if (updatesObj.analysis !== undefined) {
-    practice.analysis = updatesObj.analysis;
+    atomicSet['practices.$.analysis'] = updatesObj.analysis;
   }
   if (updatesObj.difficulty !== undefined) {
-    practice.difficulty = updatesObj.difficulty;
+    atomicSet['practices.$.difficulty'] = updatesObj.difficulty;
+  }
+  if (updatesObj.parentCharacter !== undefined) {
+    if (!['mother', 'father'].includes(updatesObj.parentCharacter)) {
+      throw new Error('無效的家長角色');
+    }
+    atomicSet['practices.$.parentCharacter'] = updatesObj.parentCharacter;
   }
 
-  if (updatesObj.history && practice.analysis && practice.analysis.trim() !== '') {
-    const nonverbalSummary = calculateNonverbalSummary(practice.history);
+  const nextHistory = updatesObj.history !== undefined ? updatesObj.history : practice.history;
+  const nextAnalysis = updatesObj.analysis !== undefined ? updatesObj.analysis : practice.analysis;
+  if (updatesObj.history !== undefined && nextAnalysis && nextAnalysis.trim() !== '') {
+    const nonverbalSummary = calculateNonverbalSummary(nextHistory);
     if (nonverbalSummary) {
-      practice.nonverbalSummary = nonverbalSummary;
+      atomicSet['practices.$.nonverbalSummary'] = nonverbalSummary;
     }
   }
 
-  await user.save();
-  return practice;
+  if (Object.keys(atomicSet).length === 0) return practice;
+
+  // 只更新目標 practice 的欄位，不再 save() 整份 User 文件。
+  // 這讓 history 與錄音的 $push 可以安全並行，避免 Mongoose VersionError。
+  const updatedUser = await User.findOneAndUpdate(
+    { _id: userId, 'practices._id': practiceId },
+    { $set: atomicSet, $inc: { __v: 1 } },
+    { new: true, runValidators: true }
+  ).select('practices');
+
+  if (!updatedUser) {
+    throw new Error('練習不存在或無權存取');
+  }
+
+  return updatedUser.practices.id(practiceId);
 }
 
 module.exports = { updateOwnedPractice };
